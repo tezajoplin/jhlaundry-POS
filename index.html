@@ -553,12 +553,15 @@ async function buildOrder(){
   const lines = kiloLines.map(l=>({...l})); if(c.kilo>0) lines.push(lineFrom(c));
   const kilo = lines.length>0, gab = a => [...new Set(a.filter(Boolean))].join(' + '), jml = f => Math.round(lines.reduce((a,l)=>a+l[f],0)*100)/100;
   const now=isoLocal(), lunas=$('fBayar').value==='Lunas';
+  /* estimasi dihitung dari jam simpan yang sama dengan jam selesai per paket di nota, supaya tidak selisih semenit */
+  const jamMax = Math.max(0, ...lines.map(l=>(PAKET[l.paket] && PAKET[l.paket].jam) || 0));
+  const estAuto = jamMax ? isoLocal(new Date(new Date(now).getTime()+jamMax*3600*1000)) : '';
   return {
     id:newId(), tanggal:now, nama, wa,
-    paket:gab(lines.map(l=>l.paket)), layanan:gab(lines.map(l=>l.layanan)), kg:jml('kg'), kgTagih:jml('kgTagih'), tarif:lines.length===1?lines[0].tarif:0, kiloan:lines,
+    paket:gab(lines.map(l=>l.paket)), layanan:gab(lines.map(l=>l.layanan)), kg:jml('kg'), kgTagih:jml('kgTagih'), tarif:lines.length===1?lines[0].tarif:0, kiloan:lines, totalKiloan:lines.reduce((a,l)=>a+l.kilo,0), totalSatuan:c.satuan,
     items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'',
     bayar:lunas?'Lunas':'Belum', metode:lunas?$('fMetode').value:'', tglBayar:lunas?now:'',
-    estimasi:(satuanOnly && !estManual) ? '' : ($('fEst').value||''), antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), dirty:true
+    estimasi:estManual ? ($('fEst').value||'') : estAuto, antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), dirty:true
   };
 }
 function isPristine(){ return !$('fNama').value.trim() && !$('fKg').value.trim() && !formItems.length && !kiloLines.length; }
@@ -712,7 +715,7 @@ function drawRekap(m){
   $('rekapHari').innerHTML = days.length ? '<tr><th>Tanggal</th><th>Pesanan</th><th>Kg</th><th>Tagihan</th></tr>'+days.map(d=>`<tr><td>${+d.slice(8)} ${BLN[+d.slice(5,7)-1]}</td><td>${r.hari[d].n}</td><td>${kgf(r.hari[d].kg)}</td><td>${rp(r.hari[d].rp)}</td></tr>`).join('')+`<tr><td><b>Total</b></td><td><b>${r.n}</b></td><td><b>${kgf(r.kg)}</b></td><td><b>${rp(r.tagihan)}</b></td></tr>` : '<tr><td class="empty" colspan="4">Belum ada pesanan bulan ini.</td></tr>';
 }
 $('rBulan').addEventListener('change',()=>renderRekap(true));
-const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan'];
+const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan','totalKiloan','totalSatuan'];
 function toCsv(list){
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   const head=CSV_COLS.concat(['satuan']).join(',');
@@ -751,7 +754,12 @@ function updateChip(){
   else { c.textContent='Tersinkron'; c.classList.add('ok'); }
   const si=$('syncInfo'); if(si) si.textContent = settings.url ? (pending()>0?`${pending()} pesanan belum terkirim ke Google Sheets.`:'Semua pesanan sudah tersimpan di Google Sheets.') : 'Belum terhubung ke Google Sheets.';
 }
-function srvOrder(o){ const {dirty,...rest}=o; return {...rest, kiloan:JSON.stringify(Array.isArray(rest.kiloan)?rest.kiloan:[])}; }
+function srvOrder(o){
+  const {dirty,...rest}=o, kl=Array.isArray(rest.kiloan)?rest.kiloan:[];
+  const tk = rest.totalKiloan!=null ? rest.totalKiloan : (kl.length ? kl.reduce((a,l)=>a+(+l.kilo||0),0) : Math.round((+rest.kgTagih||+rest.kg||0)*(+rest.tarif||0)));
+  const ts = rest.totalSatuan!=null ? rest.totalSatuan : (rest.items||[]).reduce((a,i)=>a+i.qty*i.harga,0);
+  return {...rest, totalKiloan:tk, totalSatuan:ts, kiloan:JSON.stringify(kl)};
+}
 async function fetchJson(url,opt,ms=20000){
   const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),ms);
   try{ const r=await fetch(url,{...opt,signal:ctl.signal}); return await r.json(); } finally{ clearTimeout(t); }
@@ -771,7 +779,7 @@ function mergeServer(list){
     let it=s.items; if(typeof it==='string'){ try{ it=JSON.parse(it||'[]'); }catch(e){ it=[]; } }
     let kl=s.kiloan; if(typeof kl==='string'){ try{ kl=JSON.parse(kl||'[]'); }catch(e){ kl=[]; } }
     const row={...s,items:it||[],kiloan:Array.isArray(kl)?kl:[]};
-    ['kg','kgTagih','tarif','tambah','potong','total'].forEach(k=>row[k]=+row[k]||0);
+    ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan'].forEach(k=>row[k]=+row[k]||0);
     const l=by.get(row.id);
     if(!l) orders.push({...row,dirty:false}); else if(!l.dirty) Object.assign(l,row,{dirty:false});
   }
