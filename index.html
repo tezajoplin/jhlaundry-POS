@@ -278,6 +278,10 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
     <div class="hint" style="margin-top:0">Di Android (Chrome): menu titik tiga, lalu "Pasang aplikasi" atau "Tambahkan ke layar utama". Ikon JH akan muncul di layar utama dan terbuka seperti aplikasi biasa, tanpa kolom alamat. Aplikasi tetap bisa dipakai saat internet mati; data terkirim otomatis begitu online.</div>
   </div>
   <div class="card">
+    <h2>Perangkat ini</h2>
+    <div class="hint" style="margin-top:0" id="devInfo"></div>
+  </div>
+  <div class="card">
     <h2>Cadangan</h2>
     <button class="btn ghost" id="btnBackup" type="button">Unduh semua data (JSON)</button>
   </div>
@@ -531,7 +535,13 @@ if(matchMedia('(pointer: coarse)').matches){
   document.addEventListener('focusout',()=>setTimeout(()=>{ if(!isField(document.activeElement)) document.body.classList.remove('typing'); },60));
 }
 
-function newId(){ const d=new Date(); return `JH-${String(d.getFullYear()).slice(2)}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`; }
+/* Kode perangkat 2 huruf, dibuat otomatis sekali per HP/tablet, supaya nomor nota dari dua perangkat tidak pernah bentrok */
+const DEVICE = (()=>{
+  let d=''; try{ d=localStorage.getItem('jh_device')||''; }catch(e){}
+  if(!/^[A-Z2-9]{2}$/.test(d)){ const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; d=A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; try{ localStorage.setItem('jh_device',d); }catch(e){} }
+  return d;
+})();
+function newId(){ const d=new Date(); return `JH-${String(d.getFullYear()).slice(2)}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${DEVICE}`; }
 async function buildOrder(){
   const nama=$('fNama').value.trim();
   if(!nama){ toast('Isi nama pelanggan'); $('fNama').focus(); return null; }
@@ -735,6 +745,7 @@ function fillSettings(){
   $('pUrl').value=settings.url; $('pPin').value=settings.pin; $('pMinKg').checked=!!settings.minKg;
   $('pDefPaket').innerHTML = Object.keys(PAKET).map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('') + '<option value="">Satuan saja</option>';
   $('pDefPaket').value = startPaket();
+  $('devInfo').textContent = `Kode perangkat: ${DEVICE}. Kode ini ada di akhir setiap nomor nota dari perangkat ini, jadi kamu bisa tahu pesanan dicatat dari HP atau tablet yang mana.`;
   $('pDefLay').innerHTML = LAYANAN.map(l=>`<option>${esc(l)}</option>`).join(''); $('pDefLay').value = startLayanan();
   updateChip();
 }
