@@ -129,7 +129,7 @@ th{font-size:12px;color:var(--mute);font-weight:600}
 pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#f6f8fc;border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0 12px}
 .stack>*+*{margin-top:8px}
 .note{font-size:13px;color:var(--mute);background:#fffbe6;border:1px solid #f1e3a1;border-radius:10px;padding:10px;margin-top:10px}
-.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#1c2433;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:60;display:none}
+.toast{position:fixed;left:50%;bottom:160px;transform:translateX(-50%);background:#1c2433;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:60;display:none}
 </style>
 </head>
 <body class="on-baru">
@@ -185,8 +185,10 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
   <div class="card">
     <h2>Rincian lain</h2>
     <div class="row">
-      <div><label for="fTambah">Biaya tambahan (Rp)</label><input id="fTambah" type="number" inputmode="numeric" min="0" placeholder="0"></div>
-      <div><label for="fPotong">Potongan (Rp)</label><input id="fPotong" type="number" inputmode="numeric" min="0" placeholder="0"></div>
+      <div><label for="fTambah">Biaya tambahan (Rp)</label><input id="fTambah" type="number" inputmode="numeric" min="0" placeholder="0">
+        <div id="boxKetTambah" hidden><label for="fKetTambah">Untuk apa?</label><input id="fKetTambah" type="text" autocomplete="off" placeholder="mis. ongkir, noda berat"></div></div>
+      <div><label for="fPotong">Potongan (Rp)</label><input id="fPotong" type="number" inputmode="numeric" min="0" placeholder="0">
+        <div id="boxKetPotong" hidden><label for="fKetPotong">Alasan potongan</label><input id="fKetPotong" type="text" autocomplete="off" placeholder="mis. promo, pelanggan tetap"></div></div>
     </div>
     <label class="chk" for="fAntar" style="margin-top:12px"><input id="fAntar" type="checkbox"> Antar jemput</label>
     <label for="fEst">Estimasi selesai</label>
@@ -246,6 +248,8 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
     <label for="pNama">Nama usaha</label><input id="pNama" type="text">
     <label for="pTelp">Telepon di nota</label><input id="pTelp" type="tel" placeholder="Pakai satu nomor yang sama di semua tempat">
     <label for="pAlamat">Alamat di nota</label><textarea id="pAlamat" placeholder="Pakai alamat yang sama dengan profil Google"></textarea>
+    <label for="pKetentuan">Ketentuan di nota</label><textarea id="pKetentuan" rows="7"></textarea>
+    <div class="hint">Satu ketentuan per baris. Kosongkan kalau tidak mau ditampilkan.</div>
     <label for="pFooter">Kalimat penutup</label><textarea id="pFooter"></textarea>
   </div>
   <div class="card">
@@ -332,7 +336,14 @@ function toast(t){ const el=$('toast'); el.textContent=t; el.style.display='bloc
 const load = (k,def)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){ return def; } };
 const save = (k,v)=>localStorage.setItem(k,JSON.stringify(v));
 
-let settings = Object.assign({nama:'JH Laundry',telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
+const KETENTUAN_DEFAULT = [
+  'Pakaian yang mudah luntur mohon dipisahkan. Luntur, susut, atau rusak karena sifat bahan di luar tanggung jawab kami.',
+  'Mohon cek saku sebelum diserahkan. Barang yang tertinggal di luar tanggung jawab kami.',
+  'Komplain paling lambat 1x24 jam setelah cucian diambil, dengan menunjukkan nota ini.',
+  'Cucian yang tidak diambil lebih dari 30 hari di luar tanggung jawab kami.',
+  'Kehilangan atau kerusakan karena kelalaian kami diganti maksimal 10x biaya cuci item tersebut.'
+].join('\n');
+let settings = Object.assign({nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
 let orders = load('jh_orders',[]);
 let formItems = [];
 let estManual = false;
@@ -477,6 +488,8 @@ $('fWa').addEventListener('input',()=>{ if(waAuto){ waAuto=false; $('waHint').te
 
 $('fKg').addEventListener('keydown',e=>{ if(e.key==='Enter') e.target.blur(); });
 ['fKg','fTambah','fPotong'].forEach(id=>$(id).addEventListener('input',recompute));
+function syncKetBoxes(){ $('boxKetTambah').hidden = !(parseInt($('fTambah').value)>0); $('boxKetPotong').hidden = !(parseInt($('fPotong').value)>0); }
+['fTambah','fPotong'].forEach(id=>$(id).addEventListener('input',syncKetBoxes));
 $('fEst').addEventListener('input',()=>{estManual=true;});
 $('fBayar').addEventListener('change',()=>{ $('boxMetode').style.display = $('fBayar').value==='Lunas'?'block':'none'; });
 
@@ -494,6 +507,9 @@ async function buildOrder(){
   const waRaw=$('fWa').value.trim(), wa=normWa(waRaw);
   if(waRaw && (wa.length<10 || wa.length>15)){ toast('Nomor WhatsApp sepertinya salah, cek lagi'); $('fWa').focus(); return null; }
   const c=calc(); let satuanOnly=false;
+  const ketTambah=$('fKetTambah').value.trim(), ketPotong=$('fKetPotong').value.trim();
+  if(c.tambah>0 && !ketTambah){ toast('Tulis biaya tambahan ini untuk apa'); $('fKetTambah').focus(); return null; }
+  if(c.potong>0 && !ketPotong){ toast('Tulis alasan potongan'); $('fKetPotong').focus(); return null; }
   if(c.p && !c.kg){
     if(!formItems.length){ toast('Isi berat cucian'); $('fKg').focus(); return null; }
     const ok = await choose('Berat kiloan belum diisi', `Paket ${c.pk} terpilih, tapi beratnya kosong. Kalau pelanggan hanya bawa cucian satuan, simpan sebagai satuan saja.`,
@@ -511,14 +527,14 @@ async function buildOrder(){
   return {
     id:newId(), tanggal:now, nama, wa,
     paket:kilo?c.pk:'', layanan:kilo?c.layanan:'', kg:kilo?c.kg:0, kgTagih:kilo?c.kgTagih:0, tarif:kilo?c.tarif:0,
-    items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total,
+    items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'',
     bayar:lunas?'Lunas':'Belum', metode:lunas?$('fMetode').value:'', tglBayar:lunas?now:'',
     estimasi:(satuanOnly && !estManual) ? '' : ($('fEst').value||''), antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), dirty:true
   };
 }
 function isPristine(){ return !$('fNama').value.trim() && !$('fKg').value.trim() && !formItems.length; }
 function resetForm(){
-  ['fNama','fWa','fKg','fTambah','fPotong','fCatatan','fEst','sCari'].forEach(id=>$(id).value='');
+  ['fNama','fWa','fKg','fTambah','fPotong','fKetTambah','fKetPotong','fCatatan','fEst','sCari'].forEach(id=>$(id).value=''); syncKetBoxes();
   $('fAntar').checked=false; $('fBayar').value='Belum'; $('boxMetode').style.display='none';
   $('waHint').textContent=WA_HINT; waAuto=false;
   formItems=[]; estManual=false; st.layanan=startLayanan(); renderItems();
@@ -561,13 +577,15 @@ function buildNota(o){
     }
   }
   if(o.items && o.items.length){ L.push('Satuan:'); o.items.forEach(i=>L.push(`- ${i.nama} × ${i.qty} = ${rp(i.qty*i.harga)}`)); }
-  if(o.tambah) L.push(`Biaya tambahan: ${rp(o.tambah)}`);
-  if(o.potong) L.push(`Potongan: -${rp(o.potong)}`);
+  if(o.tambah) L.push(`Biaya tambahan${o.ketTambah?` (${o.ketTambah})`:''}: ${rp(o.tambah)}`);
+  if(o.potong) L.push(`Potongan${o.ketPotong?` (${o.ketPotong})`:''}: -${rp(o.potong)}`);
   L.push('', `*Total: ${rp(o.total)}*`);
   L.push(`Status: ${o.bayar==='Lunas' ? 'Lunas'+(o.metode?` (${o.metode})`:'') : 'Belum dibayar'}`);
   if(o.estimasi) L.push(`Estimasi selesai: ${tglLabel(o.estimasi)}`);
   if(o.antar==='Ya') L.push('Antar jemput: Ya');
   if(o.catatan) L.push(`Catatan: ${o.catatan}`);
+  const ket = String(settings.ketentuan||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  if(ket.length){ L.push('', '*Ketentuan*'); ket.forEach((k,i)=>L.push(`${i+1}. ${k}`)); }
   if(settings.footer) L.push('', settings.footer);
   return L.join('\n');
 }
@@ -657,7 +675,7 @@ function drawRekap(m){
   $('rekapHari').innerHTML = days.length ? '<tr><th>Tanggal</th><th>Pesanan</th><th>Kg</th><th>Tagihan</th></tr>'+days.map(d=>`<tr><td>${+d.slice(8)} ${BLN[+d.slice(5,7)-1]}</td><td>${r.hari[d].n}</td><td>${kgf(r.hari[d].kg)}</td><td>${rp(r.hari[d].rp)}</td></tr>`).join('')+`<tr><td><b>Total</b></td><td><b>${r.n}</b></td><td><b>${kgf(r.kg)}</b></td><td><b>${rp(r.tagihan)}</b></td></tr>` : '<tr><td class="empty" colspan="4">Belum ada pesanan bulan ini.</td></tr>';
 }
 $('rBulan').addEventListener('change',()=>renderRekap(true));
-const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','potong','total','bayar','metode','tglBayar','estimasi','antar','catatan'];
+const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan'];
 function toCsv(list){
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   const head=CSV_COLS.concat(['satuan']).join(',');
@@ -673,7 +691,7 @@ $('btnSalinRekap').addEventListener('click',async()=>{
 
 /* ===================== SETELAN ===================== */
 function fillSettings(){
-  $('pNama').value=settings.nama; $('pTelp').value=settings.telp; $('pAlamat').value=settings.alamat; $('pFooter').value=settings.footer;
+  $('pNama').value=settings.nama; $('pTelp').value=settings.telp; $('pAlamat').value=settings.alamat; $('pFooter').value=settings.footer; $('pKetentuan').value=settings.ketentuan||'';
   $('pUrl').value=settings.url; $('pPin').value=settings.pin; $('pMinKg').checked=!!settings.minKg;
   $('pDefPaket').innerHTML = Object.keys(PAKET).map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('') + '<option value="">Satuan saja</option>';
   $('pDefPaket').value = startPaket();
@@ -681,7 +699,7 @@ function fillSettings(){
   updateChip();
 }
 $('btnSimpanSetelan').addEventListener('click',()=>{
-  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value};
+  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value};
   save('jh_settings',settings); if(isPristine()) resetForm(); recompute(); updateChip(); toast('Pengaturan disimpan');
 });
 $('btnSync').addEventListener('click',async()=>{ const ok=await syncAll(true); toast(ok?'Sinkron selesai':'Sinkron gagal, cek URL dan PIN'); });
