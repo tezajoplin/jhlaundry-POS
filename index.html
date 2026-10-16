@@ -155,6 +155,7 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
 
   <div class="card">
     <h2>Paket</h2>
+    <div id="kiloList"></div>
     <div class="opts paket" id="paketOpts" role="group" aria-label="Paket"></div>
     <div id="boxKilo">
       <div id="boxLayanan">
@@ -170,6 +171,7 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
         <input id="fTarif" type="text" inputmode="numeric" autocomplete="off">
         <div class="hint">Hanya untuk pesanan ini. Kembali ke harga menu setiap ganti paket atau layanan.</div>
       </div>
+      <button class="btn alt" id="btnTambahPaket" type="button" hidden style="margin-top:12px">+ Tambah paket lain</button>
     </div>
   </div>
 
@@ -346,6 +348,7 @@ const KETENTUAN_DEFAULT = [
 let settings = Object.assign({nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
 let orders = load('jh_orders',[]);
 let formItems = [];
+let kiloLines = [];   /* paket kiloan yang sudah ditambahkan, kalau pelanggan ambil lebih dari 1 paket */
 let estManual = false;
 
 /* ===================== TAB ===================== */
@@ -384,8 +387,8 @@ function setPaket(k){
   st.paket = k; const p = PAKET[k];
   if(!LAYANAN.includes(st.layanan)) st.layanan = startLayanan();
   clearTarifOv();
-  if(!estManual) $('fEst').value = (p && p.jam) ? isoLocal(new Date(Date.now()+p.jam*3600*1000)) : '';
-  if(!p) setSatuanOpen(true);
+  updateEst();
+  if(!p && !kiloLines.length) setSatuanOpen(true);
   renderPaket(); recompute();
 }
 $('paketOpts').addEventListener('click',e=>{ const b=e.target.closest('[data-p]'); if(b) setPaket(b.dataset.p); });
@@ -409,8 +412,24 @@ function calc(){
   if(p && kg>0){ kgTagih = settings.minKg ? Math.max(kg,p.min) : kg; kilo = Math.round(tarif*kgTagih); }
   const satuan = formItems.reduce((a,i)=>a+i.qty*i.harga,0);
   const tambah = parseInt($('fTambah').value)||0, potong = parseInt($('fPotong').value)||0;
-  const total = Math.max(0, kilo+satuan+tambah-potong);
-  return {pk,p,kg,layanan,tarif,kgTagih,kilo,satuan,tambah,potong,total};
+  const kiloLain = kiloLines.reduce((a,l)=>a+l.kilo,0);
+  const total = Math.max(0, kilo+kiloLain+satuan+tambah-potong);
+  return {pk,p,kg,layanan,tarif,kgTagih,kilo,kiloLain,satuan,tambah,potong,total};
+}
+function lineFrom(c){ return {paket:c.pk, layanan:c.layanan, kg:c.kg, kgTagih:c.kgTagih, tarif:c.tarif, kilo:c.kilo}; }
+function updateEst(){
+  if(estManual) return;
+  const jams = kiloLines.map(l=>PAKET[l.paket] && PAKET[l.paket].jam).concat([PAKET[st.paket] && PAKET[st.paket].jam]).filter(Boolean);
+  $('fEst').value = jams.length ? isoLocal(new Date(Date.now()+Math.max(...jams)*3600*1000)) : '';
+}
+function renderKiloList(){
+  $('kiloList').innerHTML = kiloLines.map((l,i)=>`<div class="item"><div class="inm"><b>${esc(l.paket)}${l.layanan?', '+esc(l.layanan):''}</b><span>${kgf(l.kg)} kg${l.kgTagih>l.kg?` (ditagih ${kgf(l.kgTagih)} kg)`:''} × ${rp(l.tarif)} = ${rp(l.kilo)}</span></div><button type="button" class="btn danger sm" data-delk="${i}">Hapus</button></div>`).join('')
+    + (kiloLines.length ? '<div class="hint" style="margin:4px 0 12px;padding-top:10px;border-top:1px dashed var(--line)">Paket berikutnya (kosongkan berat kalau sudah semua):</div>' : '');
+}
+async function cekBerat(kg){
+  if(kg<=20) return true;
+  return await choose(`Berat ${kgf(kg)} kg, sudah benar?`, 'Angka ini jauh di atas biasanya. Pastikan tidak salah ketik, misalnya 35 padahal 3,5.',
+    [{label:'Perbaiki berat',value:false},{label:'Ya, sudah benar',value:true,cls:'alt'}]);
 }
 function recompute(){
   const c = calc(); let t='', warn=false;
@@ -422,7 +441,9 @@ function recompute(){
   }
   $('kiloInfo').textContent = t; $('kiloInfo').classList.toggle('warn',warn);
   const nItem = formItems.reduce((a,i)=>a+i.qty,0), parts=[];
-  if(c.p) parts.push([c.pk, c.layanan, c.kg ? kgf(c.kg)+' kg' : 'berat belum diisi'].filter(Boolean).join(', '));
+  kiloLines.forEach(l=>parts.push(`${l.paket} ${kgf(l.kg)} kg`));
+  if(c.p && (c.kg || !kiloLines.length)) parts.push([c.pk, c.layanan, c.kg ? kgf(c.kg)+' kg' : 'berat belum diisi'].filter(Boolean).join(', '));
+  $('btnTambahPaket').hidden = !(c.p && c.kg>0);
   if(nItem) parts.push(`${nItem} satuan`);
   $('totRinci').textContent = parts.join(' + ') || 'Belum ada item';
   $('totNilai').textContent = rp(c.total);
@@ -430,6 +451,16 @@ function recompute(){
 }
 
 /* ---- satuan: ketuk kotak = tambah 1 ---- */
+$('btnTambahPaket').addEventListener('click',async()=>{
+  const c=calc(); if(!c.p || !c.kg) return;
+  if(!(await cekBerat(c.kg))){ $('fKg').focus(); $('fKg').select(); return; }
+  kiloLines.push(lineFrom(c));
+  $('fKg').value=''; clearTarifOv(); renderKiloList(); updateEst(); recompute();
+  toast(`${c.pk} ${kgf(c.kg)} kg ditambahkan`);
+  $('kiloList').scrollIntoView({block:'start',behavior:'smooth'});
+});
+$('kiloList').addEventListener('click',e=>{ const b=e.target.closest('[data-delk]'); if(!b) return; kiloLines.splice(+b.dataset.delk,1); renderKiloList(); updateEst(); recompute(); });
+
 function setSatuanOpen(v){ satuanOpen=v; $('satuanBody').hidden=!v; $('btnSatuanToggle').setAttribute('aria-expanded',String(v)); renderTiles(); recompute(); }
 $('btnSatuanToggle').addEventListener('click',()=>setSatuanOpen(!satuanOpen));
 function renderTiles(){
@@ -510,34 +541,32 @@ async function buildOrder(){
   const ketTambah=$('fKetTambah').value.trim(), ketPotong=$('fKetPotong').value.trim();
   if(c.tambah>0 && !ketTambah){ toast('Tulis biaya tambahan ini untuk apa'); $('fKetTambah').focus(); return null; }
   if(c.potong>0 && !ketPotong){ toast('Tulis alasan potongan'); $('fKetPotong').focus(); return null; }
-  if(c.p && !c.kg){
+  if(c.p && !c.kg && !kiloLines.length){
     if(!formItems.length){ toast('Isi berat cucian'); $('fKg').focus(); return null; }
     const ok = await choose('Berat kiloan belum diisi', `Paket ${c.pk} terpilih, tapi beratnya kosong. Kalau pelanggan hanya bawa cucian satuan, simpan sebagai satuan saja.`,
       [{label:'Isi berat dulu',value:false},{label:'Simpan sebagai satuan saja',value:true,cls:'alt'}]);
     if(!ok){ $('fKg').focus(); return null; }
     satuanOnly=true;
   }
-  if(!c.p && !formItems.length){ toast('Tambah minimal satu item satuan'); setSatuanOpen(true); return null; }
-  if(c.kg>20){
-    const ok = await choose(`Berat ${kgf(c.kg)} kg, sudah benar?`, 'Angka ini jauh di atas biasanya. Pastikan tidak salah ketik, misalnya 35 padahal 3,5.',
-      [{label:'Perbaiki berat',value:false},{label:'Ya, sudah benar',value:true,cls:'alt'}]);
-    if(!ok){ $('fKg').focus(); $('fKg').select(); return null; }
-  }
-  const now=isoLocal(), lunas=$('fBayar').value==='Lunas', kilo=c.kilo>0;
+  if(!c.p && !formItems.length && !kiloLines.length){ toast('Tambah minimal satu item satuan'); setSatuanOpen(true); return null; }
+  if(c.kg>20 && !(await cekBerat(c.kg))){ $('fKg').focus(); $('fKg').select(); return null; }
+  const lines = kiloLines.map(l=>({...l})); if(c.kilo>0) lines.push(lineFrom(c));
+  const kilo = lines.length>0, gab = a => [...new Set(a.filter(Boolean))].join(' + '), jml = f => Math.round(lines.reduce((a,l)=>a+l[f],0)*100)/100;
+  const now=isoLocal(), lunas=$('fBayar').value==='Lunas';
   return {
     id:newId(), tanggal:now, nama, wa,
-    paket:kilo?c.pk:'', layanan:kilo?c.layanan:'', kg:kilo?c.kg:0, kgTagih:kilo?c.kgTagih:0, tarif:kilo?c.tarif:0,
+    paket:gab(lines.map(l=>l.paket)), layanan:gab(lines.map(l=>l.layanan)), kg:jml('kg'), kgTagih:jml('kgTagih'), tarif:lines.length===1?lines[0].tarif:0, kiloan:lines,
     items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'',
     bayar:lunas?'Lunas':'Belum', metode:lunas?$('fMetode').value:'', tglBayar:lunas?now:'',
     estimasi:(satuanOnly && !estManual) ? '' : ($('fEst').value||''), antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), dirty:true
   };
 }
-function isPristine(){ return !$('fNama').value.trim() && !$('fKg').value.trim() && !formItems.length; }
+function isPristine(){ return !$('fNama').value.trim() && !$('fKg').value.trim() && !formItems.length && !kiloLines.length; }
 function resetForm(){
   ['fNama','fWa','fKg','fTambah','fPotong','fKetTambah','fKetPotong','fCatatan','fEst','sCari'].forEach(id=>$(id).value=''); syncKetBoxes();
   $('fAntar').checked=false; $('fBayar').value='Belum'; $('boxMetode').style.display='none';
   $('waHint').textContent=WA_HINT; waAuto=false;
-  formItems=[]; estManual=false; st.layanan=startLayanan(); renderItems();
+  formItems=[]; kiloLines=[]; renderKiloList(); estManual=false; st.layanan=startLayanan(); renderItems();
   satuanOpen=false; $('satuanBody').hidden=true; $('btnSatuanToggle').setAttribute('aria-expanded','false');
   setPaket(startPaket()); window.scrollTo(0,0);
 }
@@ -567,7 +596,15 @@ function buildNota(o){
   if(settings.alamat) L.push(settings.alamat);
   if(settings.telp) L.push(settings.telp);
   L.push('', `Nota: ${o.id}`, `Tanggal: ${tglLabel(o.tanggal)}`, `Pelanggan: ${o.nama}`, '');
-  if(o.paket){
+  const kl = Array.isArray(o.kiloan) ? o.kiloan : [];
+  if(kl.length>1){
+    L.push('Kiloan:');
+    const jamOf = l => PAKET[l.paket] && PAKET[l.paket].jam, beda = new Set(kl.map(jamOf).filter(Boolean)).size > 1;
+    kl.forEach(l=>{
+      L.push(`- ${l.paket}${l.layanan?', '+l.layanan:''}: ${kgf(l.kg)} kg${l.kgTagih>l.kg?` (ditagih ${kgf(l.kgTagih)} kg)`:''} × ${rp(l.tarif)} = ${rp(l.kilo)}`);
+      if(beda && jamOf(l)){ const d=new Date(new Date(o.tanggal).getTime()+jamOf(l)*3600*1000); L.push(`  selesai ${HARI[d.getDay()]}, ${d.getDate()} ${BLN[d.getMonth()]}, ${p2(d.getHours())}.${p2(d.getMinutes())}`); }
+    });
+  } else if(o.paket){
     const nm = o.layanan ? `${o.paket}, ${o.layanan}` : o.paket;
     L.push(`Layanan: ${nm}`);
     if(o.kg>0){
@@ -714,7 +751,7 @@ function updateChip(){
   else { c.textContent='Tersinkron'; c.classList.add('ok'); }
   const si=$('syncInfo'); if(si) si.textContent = settings.url ? (pending()>0?`${pending()} pesanan belum terkirim ke Google Sheets.`:'Semua pesanan sudah tersimpan di Google Sheets.') : 'Belum terhubung ke Google Sheets.';
 }
-function srvOrder(o){ const {dirty,...rest}=o; return rest; }
+function srvOrder(o){ const {dirty,...rest}=o; return {...rest, kiloan:JSON.stringify(Array.isArray(rest.kiloan)?rest.kiloan:[])}; }
 async function fetchJson(url,opt,ms=20000){
   const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),ms);
   try{ const r=await fetch(url,{...opt,signal:ctl.signal}); return await r.json(); } finally{ clearTimeout(t); }
@@ -732,7 +769,8 @@ function mergeServer(list){
   const by=new Map(orders.map(o=>[o.id,o]));
   for(const s of list){
     let it=s.items; if(typeof it==='string'){ try{ it=JSON.parse(it||'[]'); }catch(e){ it=[]; } }
-    const row={...s,items:it||[]};
+    let kl=s.kiloan; if(typeof kl==='string'){ try{ kl=JSON.parse(kl||'[]'); }catch(e){ kl=[]; } }
+    const row={...s,items:it||[],kiloan:Array.isArray(kl)?kl:[]};
     ['kg','kgTagih','tarif','tambah','potong','total'].forEach(k=>row[k]=+row[k]||0);
     const l=by.get(row.id);
     if(!l) orders.push({...row,dirty:false}); else if(!l.dirty) Object.assign(l,row,{dirty:false});
