@@ -117,6 +117,18 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;st
 .editbar b{color:var(--amber)}
 .editbar .hint{margin-top:2px}
 .order.void{opacity:.65}
+details{border-top:1px solid var(--line);padding:6px 0;margin-top:10px}
+summary{font-weight:600;cursor:pointer;padding:8px 0;color:var(--blue-d)}
+.hgrp{margin:6px 0 14px;padding-bottom:12px;border-bottom:1px dashed var(--line)}
+.hgrp>b{display:block;margin-bottom:2px}
+.hsat{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.promobox{margin-top:12px;padding:10px 12px;border:1.5px solid #f1c27a;background:#fff8e8;border-radius:12px}
+.promobox .chk{margin-top:0}
+.promobox b{color:var(--amber)}
+.pchips{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.pchips .chk{margin:0;font-size:14px}
+.promoprev{font-size:14px;color:var(--blue-d);font-weight:600;margin-top:10px;white-space:pre-line}
+.opt.promo small::after{content:'PROMO';display:block;color:var(--amber);font-weight:700;font-size:11px;letter-spacing:.3px}
 #recentList .item:first-child{border-top:0;padding-top:0}
 #recentList .item:last-child{padding-bottom:0}
 .order .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
@@ -182,6 +194,7 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
       </div>
       <button class="btn alt" id="btnTambahPaket" type="button" hidden style="margin-top:12px">+ Tambah paket lain</button>
     </div>
+    <div class="promobox" id="promoBox" hidden><label class="chk" for="fPromo"><input id="fPromo" type="checkbox" checked> <span id="promoTxt"></span></label></div>
   </div>
 
   <div class="card">
@@ -195,6 +208,9 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
 
   <div class="card">
     <h2>Rincian lain</h2>
+    <label for="fTanggal">Tanggal dan jam masuk</label>
+    <input id="fTanggal" type="datetime-local">
+    <div class="hint">Otomatis saat disimpan. Ubah hanya kalau memasukkan pesanan dari catatan manual.</div>
     <div class="row">
       <div><label for="fTambah">Biaya tambahan (Rp)</label><input id="fTambah" type="number" inputmode="numeric" min="0" placeholder="0">
         <div id="boxKetTambah" hidden><label for="fKetTambah">Untuk apa?</label><input id="fKetTambah" type="text" autocomplete="off" placeholder="mis. ongkir, noda berat"></div></div>
@@ -271,6 +287,29 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
     <label for="pDefLay">Layanan yang terpilih di awal</label><select id="pDefLay"></select>
     <div class="hint">Setiap pesanan baru selalu kembali ke pilihan ini, bukan ke pilihan pesanan sebelumnya.</div>
     <label class="chk" for="pMinKg"><input id="pMinKg" type="checkbox"> Tagih sesuai minimum kg paket (mis. Reguler min. 3 kg)</label>
+  </div>
+  <div class="card">
+    <h2>Harga dan promo</h2>
+    <div class="hint" style="margin-top:0">Disimpan di Google Sheet, jadi HP dan tablet otomatis memakai harga dan promo yang sama. Pesanan yang sudah tersimpan tidak berubah.</div>
+    <details><summary>Harga kiloan</summary><div id="hKilo"></div></details>
+    <details><summary>Harga satuan</summary><div id="hSatuan"></div></details>
+    <details><summary id="promoSum">Promo</summary>
+      <div id="hPromo">
+        <label class="chk" for="prAktif"><input id="prAktif" type="checkbox"> Promo aktif</label>
+        <label for="prNama">Nama promo</label><input id="prNama" type="text" autocomplete="off" placeholder="mis. Promo Awal Bulan">
+        <label for="prJenis">Bentuk potongan</label>
+        <select id="prJenis"><option value="perkg">Potongan per kg (Rp)</option><option value="persen">Diskon persen (%)</option><option value="nominal">Potongan per pesanan (Rp)</option></select>
+        <label for="prNilai">Besarnya</label><input id="prNilai" type="text" inputmode="numeric" autocomplete="off" placeholder="mis. 1000">
+        <label>Berlaku untuk paket (kosongkan = semua kiloan)</label>
+        <div class="pchips" id="prPaket"></div>
+        <div class="row"><div><label for="prMin">Minimal kg</label><input id="prMin" type="text" inputmode="numeric" autocomplete="off" placeholder="0"></div><div></div></div>
+        <div class="row"><div><label for="prMulai">Mulai</label><input id="prMulai" type="date"></div><div><label for="prSelesai">Sampai tanggal</label><input id="prSelesai" type="date"></div></div>
+        <div class="promoprev" id="promoPrev"></div>
+        <div class="hint">Promo berlaku untuk cucian kiloan, otomatis untuk semua pelanggan selama tanggalnya sesuai. Kalau ada pelanggan yang tidak mendapat promo, kasir cukup mencabut centangnya di form pesanan.</div>
+      </div>
+    </details>
+    <button class="btn" id="btnSimpanHarga" type="button" style="margin-top:12px">Simpan harga dan promo</button>
+    <div class="hint" id="hargaInfo"></div>
   </div>
   <div class="card">
     <h2>Simpan ke Google Sheets (disarankan)</h2>
@@ -353,6 +392,49 @@ function toast(t){ const el=$('toast'); el.textContent=t; el.style.display='bloc
 const load = (k,def)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){ return def; } };
 const save = (k,v)=>localStorage.setItem(k,JSON.stringify(v));
 
+/* ===================== HARGA DAN PROMO (disimpan di Google Sheet, jadi semua perangkat sama) ===================== */
+let CONFIG = load('jh_config', null);
+let configDirty = !!load('jh_config_dirty', false);
+let configErr = '';
+function applyConfig(cfg){
+  if(!cfg || typeof cfg!=='object') return;
+  const n = v => (isFinite(+v) && +v>0) ? Math.round(+v) : null;
+  Object.entries(cfg.paket||{}).forEach(([k,c])=>{
+    const p=PAKET[k]; if(!p||!c) return;
+    if(n(c.min)) p.min=n(c.min);
+    if(p.flat!=null){ if(n(c.flat)) p.flat=n(c.flat); }
+    else if(c.tarif) LAYANAN.forEach(l=>{ if(n(c.tarif[l])) p.tarif[l]=n(c.tarif[l]); });
+  });
+  SATUAN.forEach(s=>{
+    const v=(cfg.satuan||{})[s.n]; if(v==null) return;
+    if(Array.isArray(v)){ if(n(v[0])) s.h=n(v[0]); if(s.max!=null && n(v[1])) s.max=n(v[1]); }
+    else if(n(v)) s.h=n(v);
+  });
+}
+if(CONFIG) applyConfig(CONFIG);
+/* promo yang berlaku pada tanggal tertentu (null kalau tidak ada) */
+function promoActive(dateStr){
+  const p=CONFIG && CONFIG.promo;
+  if(!p || !p.aktif || !(+p.nilai>0)) return null;
+  const d=String(dateStr||'').slice(0,10);
+  if(p.mulai && d<p.mulai) return null;
+  if(p.selesai && d>p.selesai) return null;
+  return p;
+}
+const promoLabel = n => /^promo\b/i.test(n||'') ? n : 'Promo '+n;
+/* besar potongan promo untuk daftar paket kiloan; hanya paket yang termasuk dalam promo yang dihitung */
+function promoDiscount(p, lines){
+  const el=lines.filter(l=>!(p.paket && p.paket.length) || p.paket.includes(l.paket));
+  const kgOf = l => +l.kgTagih || +l.kg || 0;
+  const kg=el.reduce((a,l)=>a+kgOf(l),0), kilo=el.reduce((a,l)=>a+(+l.kilo||0),0);
+  if(!el.length || kg<(+p.minKg||0)) return 0;
+  let d=0;
+  if(p.jenis==='perkg') d=el.reduce((a,l)=>a+Math.min(+p.nilai,+l.tarif||0)*kgOf(l),0);
+  else if(p.jenis==='persen') d=kilo*Math.min(+p.nilai,100)/100;
+  else d=Math.min(+p.nilai,kilo);
+  return Math.round(d);
+}
+
 const KETENTUAN_DEFAULT = [
   'Pakaian yang mudah luntur mohon dipisahkan. Luntur, susut, atau rusak karena sifat bahan di luar tanggung jawab kami.',
   'Mohon cek saku sebelum diserahkan. Barang yang tertinggal di luar tanggung jawab kami.',
@@ -374,7 +456,7 @@ function showTab(t){
   document.querySelectorAll('main section').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));
   document.body.classList.toggle('on-baru',t==='baru');
   window.scrollTo(0,0);
-  if(t==='baru') renderRecent();
+  if(t==='baru'){ renderRecent(); if(!tglManual && !editing) $('fTanggal').value=isoLocal(); }
   if(t==='daftar') renderDaftar();
   if(t==='rekap') renderRekap(true);
   if(t==='setelan') fillSettings();
@@ -390,8 +472,9 @@ const paketSub = p => p.flat!=null ? `${rpn(p.flat)}/kg, min ${p.min} kg` : `${p
 
 function renderPaket(){
   const on = k => st.paket===k;
+  const pr = promoActive(curTanggal()), promoEl = k => pr && (!(pr.paket && pr.paket.length) || pr.paket.includes(k));
   $('paketOpts').innerHTML = Object.entries(PAKET).map(([k,p])=>
-    `<button type="button" class="opt${p.kilat?' kilat':''}${on(k)?' on':''}" data-p="${esc(k)}" aria-pressed="${on(k)}"><b>${esc(k)}</b><small>${esc(paketSub(p))}</small></button>`).join('')
+    `<button type="button" class="opt${p.kilat?' kilat':''}${on(k)?' on':''}${promoEl(k)?' promo':''}" data-p="${esc(k)}" aria-pressed="${on(k)}"><b>${esc(k)}</b><small>${esc(paketSub(p))}</small></button>`).join('')
     + `<button type="button" class="opt none${on('')?' on':''}" data-p="" aria-pressed="${on('')}"><b>Satuan saja</b><small>tanpa kiloan</small></button>`;
   const p = PAKET[st.paket];
   $('boxKilo').hidden = !p;
@@ -430,8 +513,23 @@ function calc(){
   const satuan = formItems.reduce((a,i)=>a+i.qty*i.harga,0);
   const tambah = parseInt($('fTambah').value)||0, potong = parseInt($('fPotong').value)||0;
   const kiloLain = kiloLines.reduce((a,l)=>a+l.kilo,0);
-  const total = Math.max(0, kilo+kiloLain+satuan+tambah-potong);
-  return {pk,p,kg,layanan,tarif,kgTagih,kilo,kiloLain,satuan,tambah,potong,total};
+  /* promo: dihitung dari paket kiloan di pesanan ini, memakai tanggal masuk pesanan */
+  const lines = kiloLines.concat(kg>0 ? [{paket:pk,layanan,kg,kgTagih,tarif,kilo}] : []);
+  const pr = promoActive(curTanggal());
+  const frozen = !!(editing && editing.promo && !(pr && pr.nama===editing.promo));   /* promo lama sudah berubah/selesai: nilai pesanan awal dipertahankan */
+  const promoPot = frozen ? (+editing.potongPromo||0) : (pr ? promoDiscount(pr,lines) : 0);
+  const promoNamaX = frozen ? editing.promo : (pr ? pr.nama : '');
+  const usePromo = promoPot>0 && $('fPromo').checked;
+  const promoDisc = usePromo ? promoPot : 0;
+  const total = Math.max(0, kilo+kiloLain+satuan+tambah-potong-promoDisc);
+  return {pk,p,kg,layanan,tarif,kgTagih,kilo,kiloLain,satuan,tambah,potong,total,promoPot,promoDisc,promoNama:usePromo?promoNamaX:'',promoNamaX,frozen};
+}
+/* tanggal masuk pesanan: otomatis sekarang, kecuali diisi manual atau sedang mengubah pesanan */
+let tglManual = false;
+function curTanggal(){
+  const v=$('fTanggal').value;
+  if(editing) return v || editing.tanggal;
+  return (v && tglManual) ? v : isoLocal();
 }
 function lineFrom(c){ return {paket:c.pk, layanan:c.layanan, kg:c.kg, kgTagih:c.kgTagih, tarif:c.tarif, kilo:c.kilo}; }
 const sigOf = ls => ls.slice().sort().join('|');
@@ -446,7 +544,7 @@ function updateEst(){
     return;
   }
   const jams = kiloLines.map(l=>PAKET[l.paket] && PAKET[l.paket].jam).concat([PAKET[st.paket] && PAKET[st.paket].jam]).filter(Boolean);
-  $('fEst').value = jams.length ? isoLocal(new Date(Date.now()+Math.max(...jams)*3600*1000)) : '';
+  $('fEst').value = jams.length ? isoLocal(new Date(new Date(curTanggal()).getTime()+Math.max(...jams)*3600*1000)) : '';
 }
 function renderKiloList(){
   $('kiloList').innerHTML = kiloLines.map((l,i)=>`<div class="item"><div class="inm"><b>${esc(l.paket)}${l.layanan?', '+esc(l.layanan):''}</b><span>${kgf(l.kg)} kg${l.kgTagih>l.kg?` (ditagih ${kgf(l.kgTagih)} kg)`:''} × ${rp(l.tarif)} = ${rp(l.kilo)}</span></div><div style="display:flex;gap:6px;flex:none"><button type="button" class="btn alt sm" data-edk="${i}">Ubah</button><button type="button" class="btn danger sm" data-delk="${i}">Hapus</button></div></div>`).join('')
@@ -467,6 +565,8 @@ function recompute(){
     if(st.tarifOv!=null && st.tarifOv!==defTarif()){ t += `\nTarif khusus. Harga menu ${rp(defTarif())}/kg.`; warn=true; }
   }
   $('kiloInfo').textContent = t; $('kiloInfo').classList.toggle('warn',warn);
+  $('promoBox').hidden = !(c.promoPot>0);
+  if(c.promoPot>0) $('promoTxt').innerHTML = `<b>${esc(promoLabel(c.promoNamaX))}</b>${c.frozen?' (sesuai pesanan awal)':''}: hemat ${rp(c.promoPot)}`;
   const nItem = formItems.reduce((a,i)=>a+i.qty,0), parts=[];
   kiloLines.forEach(l=>parts.push(`${l.paket} ${kgf(l.kg)} kg`));
   if(c.p && (c.kg || !kiloLines.length)) parts.push([c.pk, c.layanan, c.kg ? kgf(c.kg)+' kg' : 'berat belum diisi'].filter(Boolean).join(', '));
@@ -562,6 +662,8 @@ $('fKg').addEventListener('keydown',e=>{ if(e.key==='Enter') e.target.blur(); })
 ['fKg','fTambah','fPotong'].forEach(id=>$(id).addEventListener('input',recompute));
 function syncKetBoxes(){ $('boxKetTambah').hidden = !(parseInt($('fTambah').value)>0); $('boxKetPotong').hidden = !(parseInt($('fPotong').value)>0); }
 ['fTambah','fPotong'].forEach(id=>$(id).addEventListener('input',syncKetBoxes));
+$('fPromo').addEventListener('change',recompute);
+$('fTanggal').addEventListener('input',()=>{ tglManual=true; renderPaket(); updateEst(); recompute(); });
 $('fEst').addEventListener('input',()=>{estManual=true;});
 $('fBayar').addEventListener('change',()=>{ $('boxMetode').style.display = $('fBayar').value==='Lunas'?'block':'none'; });
 
@@ -578,8 +680,8 @@ const DEVICE = (()=>{
   if(!/^[A-Z2-9]{2}$/.test(d)){ const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; d=A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; try{ localStorage.setItem('jh_device',d); }catch(e){} }
   return d;
 })();
-function newId(){
-  const d=new Date(); let id;
+function newId(base){
+  const d=base?new Date(base):new Date(); let id;
   do{ id=`JH-${String(d.getFullYear()).slice(2)}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${DEVICE}`; d.setSeconds(d.getSeconds()+1); }
   while(orders.some(o=>o.id===id));   /* pengaman: nomor nota tidak pernah kembar */
   return id;
@@ -604,7 +706,8 @@ async function buildOrder(){
   if(c.kg>20 && !(await cekBerat(c.kg))){ $('fKg').focus(); $('fKg').select(); return null; }
   const lines = kiloLines.map(l=>({...l})); if(c.kilo>0) lines.push(lineFrom(c));
   const kilo = lines.length>0, gab = a => [...new Set(a.filter(Boolean))].join(' + '), jml = f => Math.round(lines.reduce((a,l)=>a+l[f],0)*100)/100;
-  const now=isoLocal();
+  const now=isoLocal(), tanggal=curTanggal();
+  if((tglManual||editing) && new Date(tanggal).getTime() > Date.now()+10*60*1000){ toast('Tanggal masuk tidak boleh di masa depan'); $('fTanggal').focus(); return null; }
   let bayar=$('fBayar').value==='Lunas' ? 'Lunas' : 'Belum';
   if(editing && editing.bayar==='Lunas' && bayar==='Lunas' && c.total!==editing.total){
     const sel = c.total-editing.total;
@@ -616,18 +719,18 @@ async function buildOrder(){
   const lunas = bayar==='Lunas';
   /* estimasi dihitung dari jam simpan yang sama dengan jam selesai per paket di nota, supaya tidak selisih semenit */
   const jamMax = Math.max(0, ...lines.map(l=>(PAKET[l.paket] && PAKET[l.paket].jam) || 0));
-  const estAuto = jamMax ? isoLocal(new Date(new Date(now).getTime()+jamMax*3600*1000)) : '';
+  const estAuto = jamMax ? isoLocal(new Date(new Date(tanggal).getTime()+jamMax*3600*1000)) : '';
   const out = {
-    id:editing?editing.id:newId(), tanggal:editing?editing.tanggal:now, nama, wa,
+    id:editing?editing.id:newId(new Date(tanggal)), tanggal, nama, wa,
     paket:gab(lines.map(l=>l.paket)), layanan:gab(lines.map(l=>l.layanan)), kg:jml('kg'), kgTagih:jml('kgTagih'), tarif:lines.length===1?lines[0].tarif:0, kiloan:lines, totalKiloan:lines.reduce((a,l)=>a+l.kilo,0), totalSatuan:c.satuan,
-    items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'',
-    bayar, metode:lunas?$('fMetode').value:'', tglBayar:lunas?((editing && editing.bayar==='Lunas' && editing.tglBayar) || now):'',
+    items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'', promo:c.promoNama, potongPromo:c.promoDisc,
+    bayar, metode:lunas?$('fMetode').value:'', tglBayar:lunas?((editing && editing.bayar==='Lunas' && editing.tglBayar) || (tglManual ? tanggal : now)):'',
     estimasi:(editing||estManual) ? ($('fEst').value||'') : estAuto, antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), diambil:editing?(editing.diambil||''):'', dirty:true
   };
   if(editing){
     /* riwayat perubahan ikut tersimpan di kolom Catatan di Sheet (setelah tanda ||), tidak tampil di nota pelanggan */
     const ring = x => `${x.paket||'satuan'}${x.kg>0?' '+kgf(x.kg)+'kg':''} ${rp(x.total)}`;
-    const sig = x => JSON.stringify([x.nama,dispWa(x.wa),x.paket,x.layanan,x.kg,x.total,x.items,x.tambah,x.potong,x.antar,x.estimasi,splitCat(x.catatan).note]);
+    const sig = x => JSON.stringify([x.nama,dispWa(x.wa),x.tanggal,x.paket,x.layanan,x.kg,x.total,x.items,x.tambah,x.potong,x.promo||'',x.antar,x.estimasi,splitCat(x.catatan).note]);
     const prev = splitCat(editing.catatan).hist;
     let hist = prev;
     if(sig(editing)!==sig(out)){
@@ -668,6 +771,7 @@ function loadEdit(o){
   $('fCatatan').value=splitCat(o.catatan).note; $('fAntar').checked=o.antar==='Ya';
   $('fBayar').value=o.bayar==='Lunas'?'Lunas':'Belum'; $('boxMetode').style.display=o.bayar==='Lunas'?'block':'none';
   if(o.metode) $('fMetode').value=o.metode;
+  $('fTanggal').value=o.tanggal; tglManual=false; $('fPromo').checked=!!o.promo;
   estManual=false;
   renderKiloList(); renderItems();
   setPaket(kiloLines.length ? startPaket() : '');
@@ -692,7 +796,7 @@ $('btnBatalkan').addEventListener('click',async()=>{
   const alasan=await askText('Batalkan pesanan ini?', paid ? `Pesanan ini sudah lunas ${rp(o.total)}. Kembalikan uang pelanggan. Pesanan tetap tercatat di Sheet dengan status Batal, tapi tidak dihitung di rekap.` : 'Pesanan tetap tercatat di Sheet dengan status Batal, tapi tidak dihitung di rekap. Tulis alasannya.', 'Ya, batalkan pesanan');
   if(alasan==null) return;
   const {note,hist}=splitCat(o.catatan);
-  const c2={...o, bayar:'Batal', metode:'', tglBayar:'', total:0, kg:0, kgTagih:0, tarif:0, tambah:0, potong:0, totalKiloan:0, totalSatuan:0, dirty:true,
+  const c2={...o, bayar:'Batal', metode:'', tglBayar:'', total:0, kg:0, kgTagih:0, tarif:0, tambah:0, potong:0, potongPromo:0, totalKiloan:0, totalSatuan:0, dirty:true,
     catatan: note+' ||'+[hist,`Dibatalkan ${stampNow()} (${alasan}), semula ${rp(o.total)}`].filter(Boolean).join(' | ')};
   const i=orders.findIndex(x=>x.id===o.id); if(i>=0) orders[i]=c2; else orders.push(c2);
   persist(); resetForm(); showTab('daftar'); syncOne(c2); toast('Pesanan dibatalkan');
@@ -700,6 +804,7 @@ $('btnBatalkan').addEventListener('click',async()=>{
 
 function resetForm(){
   editing=null; setEditUI(false);
+  $('fTanggal').value=isoLocal(); tglManual=false; $('fPromo').checked=true;
   ['fNama','fWa','fKg','fTambah','fPotong','fKetTambah','fKetPotong','fCatatan','fEst','sCari'].forEach(id=>$(id).value=''); syncKetBoxes();
   $('fAntar').checked=false; $('fBayar').value='Belum'; $('boxMetode').style.display='none';
   $('waHint').textContent=WA_HINT; waAuto=false;
@@ -755,6 +860,7 @@ function buildNota(o){
   }
   if(o.items && o.items.length){ L.push('Satuan:'); o.items.forEach(i=>L.push(`- ${i.nama} × ${i.qty} = ${rp(i.qty*i.harga)}`)); }
   if(o.tambah) L.push(`Biaya tambahan${o.ketTambah?` (${o.ketTambah})`:''}: ${rp(o.tambah)}`);
+  if(o.potongPromo>0) L.push(`${promoLabel(o.promo)}: -${rp(o.potongPromo)}`);
   if(o.potong) L.push(`Potongan${o.ketPotong?` (${o.ketPotong})`:''}: -${rp(o.potong)}`);
   L.push('', `*Total: ${rp(o.total)}*`);
   L.push(`Status: ${o.bayar==='Lunas' ? 'Lunas'+(o.metode?` (${o.metode})`:'') : 'Belum dibayar'}`);
@@ -824,7 +930,7 @@ function renderDaftar(){
     const desc=[o.paket,kiloTxt,sat].filter(Boolean).join(' · ');
     const batal = o.bayar==='Batal';
     const hari = Math.max(0, Math.floor((Date.now()-new Date(o.tanggal).getTime())/86400000));
-    return `<div class="card order${batal?' void':''}"><div class="top"><div><div class="nm">${esc(o.nama)}</div><div class="meta">${esc(o.id)} · ${o.tanggal.slice(11)}</div><div class="meta">${esc(desc)}</div>${ambil?`<div class="meta" style="color:${hari>=30?'var(--red)':hari>=7?'var(--amber)':'var(--mute)'};font-weight:600">Masuk ${o.tanggal.slice(8,10)}/${o.tanggal.slice(5,7)}, menunggu ${hari<1?'sejak hari ini':hari+' hari'}</div>`:''}${!ambil && o.diambil && !batal?`<div class="meta" style="color:var(--green)">Diambil ${o.diambil.slice(8,10)}/${o.diambil.slice(5,7)} ${o.diambil.slice(11,16).replace(':','.')}</div>`:''}</div>
+    return `<div class="card order${batal?' void':''}"><div class="top"><div><div class="nm">${esc(o.nama)}</div><div class="meta">${esc(o.id)} · ${o.tanggal.slice(11)}</div><div class="meta">${esc(desc)}</div>${o.potongPromo>0?`<div class="meta" style="color:var(--amber)">${esc(promoLabel(o.promo))}: -${rp(o.potongPromo)}</div>`:''}${ambil?`<div class="meta" style="color:${hari>=30?'var(--red)':hari>=7?'var(--amber)':'var(--mute)'};font-weight:600">Masuk ${o.tanggal.slice(8,10)}/${o.tanggal.slice(5,7)}, menunggu ${hari<1?'sejak hari ini':hari+' hari'}</div>`:''}${!ambil && o.diambil && !batal?`<div class="meta" style="color:var(--green)">Diambil ${o.diambil.slice(8,10)}/${o.diambil.slice(5,7)} ${o.diambil.slice(11,16).replace(':','.')}</div>`:''}</div>
       <div style="text-align:right"><div style="font-weight:700">${rp(o.total)}</div><span class="badge ${batal?'batal':o.bayar==='Lunas'?'lunas':'belum'}">${batal?'Batal':o.bayar==='Lunas'?'Lunas':'Belum bayar'}</span></div></div>
       ${batal?'':`<div class="acts"><button class="btn alt sm" data-nota="${esc(o.id)}" type="button">Nota</button><button class="btn alt sm" data-ubah="${esc(o.id)}" type="button">Ubah</button>${o.bayar!=='Lunas'?`<button class="btn sm" data-lunas="${esc(o.id)}" type="button">Tandai lunas</button>`:''}${!o.diambil?`<button class="btn wa sm" data-ambil="${esc(o.id)}" type="button">Sudah diambil</button>`:`<button class="btn ghost sm" data-urung="${esc(o.id)}" type="button">Urungkan diambil</button>`}</div>`}</div>`;
   }).join('');
@@ -890,7 +996,8 @@ function rekapCalc(m){
   const belum=inM.filter(o=>o.bayar!=='Lunas').reduce((a,o)=>a+o.total,0);
   const masuk=orders.filter(o=>o.bayar==='Lunas' && (o.tglBayar||o.tanggal).startsWith(m)).reduce((a,o)=>a+o.total,0);
   const hari={}; inM.forEach(o=>{ const d=o.tanggal.slice(0,10); (hari[d]=hari[d]||{n:0,kg:0,rp:0}); hari[d].n++; hari[d].kg+=(+o.kg||0); hari[d].rp+=o.total; });
-  return {n:inM.length,kg,tagihan,belum,masuk,hari,inM,allM};
+  const promoN=inM.filter(o=>o.potongPromo>0).length, promoRp=inM.reduce((a,o)=>a+(+o.potongPromo||0),0);
+  return {n:inM.length,kg,tagihan,belum,masuk,hari,inM,allM,promoN,promoRp};
 }
 async function renderRekap(withSync){
   if(!$('rBulan').value) $('rBulan').value=todayStr().slice(0,7);
@@ -900,12 +1007,12 @@ async function renderRekap(withSync){
 }
 function drawRekap(m){
   const r=rekapCalc(m);
-  $('rekapStats').innerHTML=[['Pesanan',r.n],['Total kg',kgf(r.kg)+' kg'],['Uang masuk',rp(r.masuk)],['Belum dibayar',rp(r.belum)]].map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  $('rekapStats').innerHTML=[['Pesanan',r.n],['Total kg',kgf(r.kg)+' kg'],['Uang masuk',rp(r.masuk)],['Belum dibayar',rp(r.belum)]].concat(r.promoN>0?[['Pesanan promo',r.promoN],['Diskon promo',rp(r.promoRp)]]:[]).map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
   const days=Object.keys(r.hari).sort();
   $('rekapHari').innerHTML = days.length ? '<tr><th>Tanggal</th><th>Pesanan</th><th>Kg</th><th>Tagihan</th></tr>'+days.map(d=>`<tr><td>${+d.slice(8)} ${BLN[+d.slice(5,7)-1]}</td><td>${r.hari[d].n}</td><td>${kgf(r.hari[d].kg)}</td><td>${rp(r.hari[d].rp)}</td></tr>`).join('')+`<tr><td><b>Total</b></td><td><b>${r.n}</b></td><td><b>${kgf(r.kg)}</b></td><td><b>${rp(r.tagihan)}</b></td></tr>` : '<tr><td class="empty" colspan="4">Belum ada pesanan bulan ini.</td></tr>';
 }
 $('rBulan').addEventListener('change',()=>renderRekap(true));
-const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan','totalKiloan','totalSatuan','diambil'];
+const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan','totalKiloan','totalSatuan','diambil','promo','potongPromo'];
 function toCsv(list){
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   const head=CSV_COLS.concat(['satuan']).join(',');
@@ -927,8 +1034,77 @@ function fillSettings(){
   $('pDefPaket').value = startPaket();
   $('devInfo').textContent = `Kode perangkat: ${DEVICE}. Kode ini ada di akhir setiap nomor nota dari perangkat ini, jadi kamu bisa tahu pesanan dicatat dari HP atau tablet yang mana.`;
   $('pDefLay').innerHTML = LAYANAN.map(l=>`<option>${esc(l)}</option>`).join(''); $('pDefLay').value = startLayanan();
+  renderHarga();
   updateChip();
 }
+function renderHarga(){
+  $('hKilo').innerHTML = Object.entries(PAKET).map(([k,p])=>{
+    if(p.flat!=null) return `<div class="hgrp"><b>${esc(k)}</b><div class="row"><div><label>Harga per kg</label><input inputmode="numeric" autocomplete="off" data-hf="${esc(k)}" value="${p.flat}"></div><div><label>Minimal kg</label><input inputmode="numeric" autocomplete="off" data-hm="${esc(k)}" value="${p.min}"></div></div></div>`;
+    return `<div class="hgrp"><b>${esc(k)}</b><div class="row">${LAYANAN.map(l=>`<div><label>${esc(LAY_PENDEK[l]||l)}</label><input inputmode="numeric" autocomplete="off" data-hp="${esc(k)}" data-hl="${esc(l)}" value="${p.tarif[l]}"></div>`).join('')}</div><div class="row" style="margin-top:8px"><div><label>Minimal kg</label><input inputmode="numeric" autocomplete="off" data-hm="${esc(k)}" value="${p.min}"></div><div></div><div></div></div></div>`;
+  }).join('');
+  $('hSatuan').innerHTML = '<div class="hsat">'+SATUAN.map((s,i)=> s.max!=null
+    ? `<div><label>${esc(s.n)} (dari)</label><input inputmode="numeric" autocomplete="off" data-hs="${i}" data-hk="h" value="${s.h}"></div><div><label>${esc(s.n)} (sampai)</label><input inputmode="numeric" autocomplete="off" data-hs="${i}" data-hk="max" value="${s.max}"></div>`
+    : `<div><label>${esc(s.n)}</label><input inputmode="numeric" autocomplete="off" data-hs="${i}" data-hk="h" value="${s.h}"></div>`).join('')+'</div>';
+  const pr=(CONFIG && CONFIG.promo) || {};
+  $('prAktif').checked=!!pr.aktif; $('prNama').value=pr.nama||''; $('prJenis').value=pr.jenis||'perkg';
+  $('prNilai').value=pr.nilai||''; $('prMin').value=pr.minKg||''; $('prMulai').value=pr.mulai||''; $('prSelesai').value=pr.selesai||'';
+  $('prPaket').innerHTML = Object.keys(PAKET).map(k=>`<label class="chk"><input type="checkbox" data-pp="${esc(k)}" ${(pr.paket||[]).includes(k)?'checked':''}> ${esc(k)}</label>`).join('');
+  updatePromoPreview(); updatePromoSummary(); updateHargaInfo();
+}
+const numOf = el => { const d=String(el.value).replace(/\D/g,''); return d==='' ? NaN : +d; };
+function readPromoForm(){
+  return {aktif:$('prAktif').checked, nama:$('prNama').value.trim(), jenis:$('prJenis').value, nilai:numOf($('prNilai'))||0,
+    paket:[...$('prPaket').querySelectorAll('input:checked')].map(e=>e.dataset.pp), minKg:numOf($('prMin'))||0, mulai:$('prMulai').value, selesai:$('prSelesai').value};
+}
+function readHarga(){
+  const paket={}; Object.entries(PAKET).forEach(([k,p])=>{ paket[k]= p.flat!=null ? {min:0,flat:0} : {min:0,tarif:{}}; });
+  for(const el of $('hKilo').querySelectorAll('input')){
+    const v=numOf(el); if(!(v>0)) return {error:'Ada harga kiloan yang kosong atau nol', el};
+    if(el.dataset.hm) paket[el.dataset.hm].min=v; else if(el.dataset.hf) paket[el.dataset.hf].flat=v; else paket[el.dataset.hp].tarif[el.dataset.hl]=v;
+  }
+  const satuan={};
+  for(const el of $('hSatuan').querySelectorAll('input')){
+    const v=numOf(el); if(!(v>0)) return {error:'Ada harga satuan yang kosong atau nol', el};
+    const s=SATUAN[+el.dataset.hs];
+    if(s.max!=null){ satuan[s.n]=satuan[s.n]||[0,0]; satuan[s.n][el.dataset.hk==='h'?0:1]=v; } else satuan[s.n]=v;
+  }
+  const promo=readPromoForm();
+  if(promo.aktif){
+    if(!promo.nama) return {error:'Isi nama promo', el:$('prNama')};
+    if(!(promo.nilai>0)) return {error:'Isi besarnya potongan promo', el:$('prNilai')};
+    if(promo.jenis==='persen' && promo.nilai>100) return {error:'Diskon persen tidak boleh lebih dari 100', el:$('prNilai')};
+    if(!promo.mulai || !promo.selesai) return {error:'Isi tanggal mulai dan tanggal selesai promo', el:$('prMulai')};
+    if(promo.selesai<promo.mulai) return {error:'Tanggal selesai promo lebih awal dari tanggal mulai', el:$('prSelesai')};
+  }
+  return {paket,satuan,promo};
+}
+function updatePromoPreview(){
+  const p=readPromoForm(); const k=p.paket[0] || 'Reguler', pk=PAKET[k];
+  if(!(p.nilai>0) || !pk){ $('promoPrev').textContent=''; return; }
+  const kg=Math.max(5, +p.minKg||0), tarif = pk.flat!=null ? pk.flat : pk.tarif['Cuci Komplit'], kgT=Math.max(kg,pk.min), kilo=tarif*kgT;
+  const d=promoDiscount(p,[{paket:k,kg,kgTagih:kgT,tarif,kilo}]);
+  $('promoPrev').textContent = d>0 ? `Contoh: ${k} ${kg} kg. Harga normal ${rp(kilo)}, dengan promo ${rp(kilo-d)} (hemat ${rp(d)}).` : 'Dengan pengaturan ini, contoh 5 kg tidak mendapat potongan. Cek paket dan minimal kg-nya.';
+}
+function updatePromoSummary(){
+  const p=CONFIG && CONFIG.promo;
+  $('promoSum').textContent = (p && p.aktif && p.nama) ? `Promo: ${p.nama} (${p.mulai.slice(8,10)}/${p.mulai.slice(5,7)} sampai ${p.selesai.slice(8,10)}/${p.selesai.slice(5,7)})` : 'Promo: tidak ada';
+}
+function updateHargaInfo(){
+  let t;
+  if(!settings.url) t='Belum terhubung ke Google Sheet, jadi harga dan promo hanya berlaku di perangkat ini.';
+  else if(configDirty) t = configErr==='aksi tidak dikenal' ? 'Belum terkirim ke Sheet: Code.gs di Apps Script belum diperbarui.' : 'Belum terkirim ke Sheet. Akan dicoba lagi saat sinkron.';
+  else t='Tersimpan di Google Sheet. HP dan tablet lain ikut memakai ini saat sinkron.';
+  $('hargaInfo').textContent=t;
+}
+$('hPromo').addEventListener('input',updatePromoPreview); $('hPromo').addEventListener('change',updatePromoPreview);
+$('btnSimpanHarga').addEventListener('click',async()=>{
+  const r=readHarga(); if(r.error){ toast(r.error); if(r.el){ r.el.scrollIntoView({block:'center'}); r.el.focus(); } return; }
+  CONFIG={v:Date.now(), paket:r.paket, satuan:r.satuan, promo:r.promo};
+  save('jh_config',CONFIG); applyConfig(CONFIG); configDirty=true; save('jh_config_dirty',true);
+  renderPaket(); renderTiles(); recompute(); updatePromoSummary();
+  const ok=await pushConfig(); updateHargaInfo();
+  toast(ok ? 'Harga dan promo tersimpan di Sheet' : 'Tersimpan di perangkat ini');
+});
 $('btnSimpanSetelan').addEventListener('click',()=>{
   settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value};
   save('jh_settings',settings); if(isPristine()) resetForm(); recompute(); updateChip(); toast('Pengaturan disimpan');
@@ -963,14 +1139,32 @@ async function syncOne(o){
   }catch(e){ /* tetap antre, dicoba lagi nanti */ }
   updateChip();
 }
-async function pushPending(){ for(const o of orders.filter(x=>x.dirty)) await syncOne(o); }
+async function pushConfig(){
+  if(!configDirty) return true;
+  if(!settings.url) return false;
+  try{
+    const res=await fetchJson(settings.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:settings.pin,action:'setConfig',config:CONFIG})});
+    if(res&&res.ok){ configDirty=false; configErr=''; save('jh_config_dirty',false); return true; }
+    configErr=(res&&res.error)||'';
+  }catch(e){}
+  return false;
+}
+function mergeConfig(srv){
+  if(!srv || typeof srv!=='object' || !srv.v) return;
+  if(configDirty) return;                         /* perubahan di perangkat ini belum terkirim: jangan ditimpa */
+  if(CONFIG && CONFIG.v>=srv.v) return;
+  CONFIG=srv; save('jh_config',CONFIG); applyConfig(srv);
+  renderPaket(); renderTiles(); recompute();
+  if($('hKilo').children.length) renderHarga();
+}
+async function pushPending(){ await pushConfig(); for(const o of orders.filter(x=>x.dirty)) await syncOne(o); }
 function mergeServer(list){
   const by=new Map(orders.map(o=>[o.id,o]));
   for(const s of list){
     let it=s.items; if(typeof it==='string'){ try{ it=JSON.parse(it||'[]'); }catch(e){ it=[]; } }
     let kl=s.kiloan; if(typeof kl==='string'){ try{ kl=JSON.parse(kl||'[]'); }catch(e){ kl=[]; } }
     const row={...s,items:it||[],kiloan:Array.isArray(kl)?kl:[]};
-    ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan'].forEach(k=>row[k]=+row[k]||0);
+    ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan','potongPromo'].forEach(k=>row[k]=+row[k]||0);
     const l=by.get(row.id);
     if(!l) orders.push({...row,dirty:false}); else if(!l.dirty) Object.assign(l,row,{dirty:false});
   }
@@ -981,7 +1175,7 @@ async function syncRange(from,to){
   try{
     const u=`${settings.url}${settings.url.includes('?')?'&':'?'}action=list&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&key=${encodeURIComponent(settings.pin)}`;
     const res=await fetchJson(u,{method:'GET'});
-    if(res&&res.ok){ mergeServer(res.orders||[]); updateChip(); return true; }
+    if(res&&res.ok){ mergeServer(res.orders||[]); mergeConfig(res.config); updateChip(); return true; }
   }catch(e){}
   return false;
 }

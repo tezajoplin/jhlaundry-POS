@@ -6,9 +6,9 @@ const PIN = 'GANTI-PIN-INI';   // <- isi PIN rahasia, samakan dengan kolom PIN d
 
 const SHEET = 'Pesanan';
 // KEYS = nama field di aplikasi, HEADERS = judul kolom yang tampil di Sheet
-const KEYS = ['id','tanggal','bulan','nama','wa','paket','layanan','kg','kgTagih','tarif','satuan','tambah','potong','total','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','totalKiloan','totalSatuan','diambil'];
-const HEADERS = ['ID','Tanggal','Bulan','Nama','WhatsApp','Paket','Layanan','Kg','Kg ditagih','Tarif per kg','Satuan (ringkas)','Biaya tambahan','Potongan','Total','Status bayar','Cara bayar','Tanggal bayar','Estimasi selesai','Antar jemput','Catatan','Items (JSON)','Ket. biaya tambahan','Ket. potongan','Rincian kiloan (JSON)','Total kiloan (Rp)','Total satuan (Rp)','Tanggal diambil'];
-const NUM = ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan'];
+const KEYS = ['id','tanggal','bulan','nama','wa','paket','layanan','kg','kgTagih','tarif','satuan','tambah','potong','total','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','totalKiloan','totalSatuan','diambil','promo','potongPromo'];
+const HEADERS = ['ID','Tanggal','Bulan','Nama','WhatsApp','Paket','Layanan','Kg','Kg ditagih','Tarif per kg','Satuan (ringkas)','Biaya tambahan','Potongan','Total','Status bayar','Cara bayar','Tanggal bayar','Estimasi selesai','Antar jemput','Catatan','Items (JSON)','Ket. biaya tambahan','Ket. potongan','Rincian kiloan (JSON)','Total kiloan (Rp)','Total satuan (Rp)','Tanggal diambil','Promo','Potongan promo (Rp)'];
+const NUM = ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan','potongPromo'];
 
 /** Jalankan SEKALI dari editor Apps Script (menu Run > setup) untuk membuat tab Pesanan dan Rekap. */
 function setup() {
@@ -21,7 +21,7 @@ function setup() {
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold').setBackground('#1b4aa0').setFontColor('#ffffff');
   sh.setFrozenRows(1);
   // kolom teks supaya tanggal dan nomor tidak diubah otomatis oleh Sheets
-  const textCols = ['id','tanggal','bulan','nama','wa','paket','layanan','satuan','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','diambil'];
+  const textCols = ['id','tanggal','bulan','nama','wa','paket','layanan','satuan','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','diambil','promo'];
   textCols.forEach(k => sh.getRange(1, KEYS.indexOf(k) + 1, sh.getMaxRows(), 1).setNumberFormat('@'));
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   NUM.forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat(k === 'kg' || k === 'kgTagih' ? '0.0' : '#,##0'));
@@ -60,8 +60,27 @@ function ensureHeaders_(sh) {
   const cur = sh.getRange(1, 1, 1, HEADERS.length).getValues()[0];
   if (HEADERS.every((h, i) => cur[i] === h)) return;
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold').setBackground('#1b4aa0').setFontColor('#ffffff');
-  ['ketTambah','ketPotong','kiloan','diambil'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('@'));
-  ['totalKiloan','totalSatuan'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('#,##0'));
+  ['ketTambah','ketPotong','kiloan','diambil','promo'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('@'));
+  ['totalKiloan','totalSatuan','potongPromo'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('#,##0'));
+}
+
+/** Harga dan promo disimpan di tab Pengaturan, supaya semua HP dan tablet memakai yang sama. */
+const CFG_SHEET = 'Pengaturan';
+function getConfig_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CFG_SHEET);
+  if (!sh) return null;
+  try { return JSON.parse(String(sh.getRange('A2').getValue() || 'null')); } catch (err) { return null; }
+}
+function setConfig_(cfg) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(CFG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CFG_SHEET);
+    sh.getRange('A1').setValue('Harga dan promo (JSON). Diatur dari aplikasi kasir, jangan diedit manual.').setFontWeight('bold');
+    sh.getRange('A2').setNumberFormat('@');
+  }
+  sh.getRange('A2').setValue(JSON.stringify(cfg));
+  sh.getRange('A3').setValue('Terakhir diubah: ' + new Date(Number(cfg.v) || Date.now()).toLocaleString('id-ID', { timeZone: 'Asia/Pontianak' }));
 }
 
 const rb_ = n => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -89,10 +108,11 @@ function objToRow_(o) {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.key !== PIN) return json_({ ok: false, error: 'PIN salah' });
+  if (p.action === 'config') return json_({ ok: true, config: getConfig_() });
   if (p.action !== 'list') return json_({ ok: false, error: 'aksi tidak dikenal' });
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET);
   const last = sh.getLastRow();
-  if (last < 2) return json_({ ok: true, orders: [] });
+  if (last < 2) return json_({ ok: true, orders: [], config: getConfig_() });
   const from = String(p.from || '0000-00-00'), to = String(p.to || '9999-12-31');
   const rows = sh.getRange(2, 1, last - 1, KEYS.length).getValues();
   const out = [];
@@ -101,13 +121,19 @@ function doGet(e) {
     const d1 = o.tanggal.slice(0, 10), d2 = o.tglBayar.slice(0, 10);
     if ((d1 >= from && d1 <= to) || (d2 && d2 >= from && d2 <= to)) out.push(o);
   });
-  return json_({ ok: true, orders: out });
+  return json_({ ok: true, orders: out, config: getConfig_() });
 }
 
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'data tidak valid' }); }
   if (body.key !== PIN) return json_({ ok: false, error: 'PIN salah' });
+  if (body.action === 'setConfig') {
+    if (!body.config || typeof body.config !== 'object') return json_({ ok: false, error: 'config tidak valid' });
+    const lk = LockService.getScriptLock();
+    lk.waitLock(20000);
+    try { setConfig_(body.config); return json_({ ok: true }); } finally { lk.releaseLock(); }
+  }
   if (body.action !== 'upsert' || !body.order || !body.order.id) return json_({ ok: false, error: 'aksi tidak dikenal' });
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
