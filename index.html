@@ -117,6 +117,8 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;st
 .editbar b{color:var(--amber)}
 .editbar .hint{margin-top:2px}
 .order.void{opacity:.65}
+#recentList .item:first-child{border-top:0;padding-top:0}
+#recentList .item:last-child{padding-bottom:0}
 .order .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
@@ -149,6 +151,7 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
 <!-- ============ PESANAN BARU ============ -->
 <section id="tab-baru" class="on">
   <div class="card editbar" id="editBar" hidden><div><b>Mengubah pesanan</b><div class="hint" id="editInfo"></div></div><button class="btn ghost sm" id="btnBatalUbah" type="button">Batal ubah</button></div>
+  <div class="card" id="recentCard" hidden><h2>Pesanan terakhir hari ini</h2><div id="recentList"></div></div>
   <div class="card">
     <h2>Pelanggan</h2>
     <label for="fNama">Nama pelanggan</label>
@@ -370,6 +373,7 @@ function showTab(t){
   document.querySelectorAll('main section').forEach(s=>s.classList.toggle('on',s.id==='tab-'+t));
   document.body.classList.toggle('on-baru',t==='baru');
   window.scrollTo(0,0);
+  if(t==='baru') renderRecent();
   if(t==='daftar') renderDaftar();
   if(t==='rekap') renderRekap(true);
   if(t==='setelan') fillSettings();
@@ -573,7 +577,12 @@ const DEVICE = (()=>{
   if(!/^[A-Z2-9]{2}$/.test(d)){ const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; d=A[Math.floor(Math.random()*A.length)]+A[Math.floor(Math.random()*A.length)]; try{ localStorage.setItem('jh_device',d); }catch(e){} }
   return d;
 })();
-function newId(){ const d=new Date(); return `JH-${String(d.getFullYear()).slice(2)}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${DEVICE}`; }
+function newId(){
+  const d=new Date(); let id;
+  do{ id=`JH-${String(d.getFullYear()).slice(2)}${p2(d.getMonth()+1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${DEVICE}`; d.setSeconds(d.getSeconds()+1); }
+  while(orders.some(o=>o.id===id));   /* pengaman: nomor nota tidak pernah kembar */
+  return id;
+}
 async function buildOrder(){
   const nama=$('fNama').value.trim();
   if(!nama){ toast('Isi nama pelanggan'); $('fNama').focus(); return null; }
@@ -645,6 +654,7 @@ function setEditUI(on){
   $('btnSimpan').textContent = on ? 'Simpan perubahan tanpa kirim nota' : 'Simpan tanpa kirim nota';
   $('btnSimpanKirim').textContent = on ? 'Simpan & kirim ulang' : 'Simpan & kirim nota';
   if(on) $('editInfo').textContent = `${editing.nama}, ${editing.id}`;
+  renderRecent();
 }
 function loadEdit(o){
   resetForm();
@@ -781,12 +791,14 @@ function askNumber(title,hint,val,quick){
 
 function showNota(o, autoWa){
   const sd = o.wa ? '' : '<div class="note">Nomor WhatsApp belum diisi. Tombol kirim akan membuka WhatsApp, lalu pilih kontaknya.</div>';
-  openModal(`<h3>Nota ${esc(o.id)}</h3><pre class="nota" id="notaTxt">${esc(buildNota(o))}</pre>${sd}
+  openModal(`<h3>Nota ${esc(o.id)}</h3>
     <div class="stack">
       <a class="btn wa" id="aWa" href="${waLink(o)}" target="_blank" rel="noopener">Kirim ke WhatsApp</a>
-      <button class="btn alt" id="btnSalin" type="button">Salin nota</button>
-      <button class="btn ghost" id="btnTutup" type="button">Selesai</button>
-    </div>`);
+      <div class="row">${o.bayar==='Batal'?'':'<button class="btn alt" id="btnUbahNota" type="button">Ubah pesanan</button>'}<button class="btn ghost" id="btnTutup" type="button">Selesai</button></div>
+    </div>
+    <pre class="nota" id="notaTxt" style="margin-top:12px">${esc(buildNota(o))}</pre>${sd}
+    <button class="btn alt" id="btnSalin" type="button">Salin nota</button>`);
+  if($('btnUbahNota')) $('btnUbahNota').addEventListener('click',()=>{ closeModal(); startEdit(o.id); });
   $('btnSalin').addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(buildNota(o)); toast('Nota disalin'); }catch(e){ toast('Tidak bisa menyalin'); } });
   $('btnTutup').addEventListener('click',()=>closeModal());
   if(autoWa){ setTimeout(()=>{ window.open(waLink(o),'_blank'); },150); }
@@ -808,15 +820,26 @@ function renderDaftar(){
   }).join('');
   $('daftarList').querySelectorAll('[data-nota]').forEach(b=>b.addEventListener('click',()=>showNota(orders.find(o=>o.id===b.dataset.nota),false)));
   $('daftarList').querySelectorAll('[data-lunas]').forEach(b=>b.addEventListener('click',()=>askPay(b.dataset.lunas)));
-  $('daftarList').querySelectorAll('[data-ubah]').forEach(b=>b.addEventListener('click',async()=>{
-    const o=orders.find(x=>x.id===b.dataset.ubah); if(!o) return;
-    if(!editing && !isPristine()){
-      const ok=await choose('Ada pesanan baru yang belum disimpan','Mengubah pesanan lain akan menghapus isian yang sedang dibuat.',[{label:'Lanjut ubah pesanan lain',value:true},{label:'Kembali',value:false,cls:'ghost'}]);
-      if(!ok) return;
-    }
-    showTab('baru'); loadEdit(o);
-  }));
+  $('daftarList').querySelectorAll('[data-ubah]').forEach(b=>b.addEventListener('click',()=>startEdit(b.dataset.ubah)));
 }
+async function startEdit(id){
+  const o=orders.find(x=>x.id===id); if(!o) return;
+  if(!editing && !isPristine()){
+    const ok=await choose('Ada pesanan baru yang belum disimpan','Mengubah pesanan lain akan menghapus isian yang sedang dibuat.',[{label:'Lanjut ubah pesanan lain',value:true},{label:'Kembali',value:false,cls:'ghost'}]);
+    if(!ok) return;
+  }
+  showTab('baru'); loadEdit(o);
+}
+/* Jalan pintas di tab Pesanan: 3 pesanan terakhir hari ini, tinggal ketuk Ubah */
+function renderRecent(){
+  const list = editing ? [] : orders.filter(o=>o.tanggal.startsWith(todayStr()) && o.bayar!=='Batal').sort((a,b)=>b.tanggal.localeCompare(a.tanggal)).slice(0,3);
+  $('recentCard').hidden = !list.length;
+  $('recentList').innerHTML = list.map(o=>{
+    const desc=[o.paket, o.kg>0?`${kgf(o.kg)} kg`:'', (o.items&&o.items.length)?`${o.items.reduce((a,i)=>a+i.qty,0)} satuan`:''].filter(Boolean).join(', ');
+    return `<div class="item"><div class="inm"><b>${esc(o.nama)}</b><span>${esc(desc)} · ${rp(o.total)}${o.bayar==='Lunas'?' · Lunas':''}</span></div><button type="button" class="btn alt sm" data-ubah="${esc(o.id)}">Ubah</button></div>`;
+  }).join('');
+}
+$('recentList').addEventListener('click',e=>{ const b=e.target.closest('[data-ubah]'); if(b) startEdit(b.dataset.ubah); });
 $('dTgl').addEventListener('change',renderDaftar); $('dCari').addEventListener('input',renderDaftar);
 function askPay(id){
   openModal(`<h3>Tandai lunas</h3><p class="hint" style="margin-bottom:10px">Pilih cara bayar.</p><div class="stack">
@@ -938,6 +961,7 @@ async function syncAll(manual){
   const from=`${d.getFullYear()}-${p2(d.getMonth()+1)}-01`;
   const ok=await syncRange(from,'9999-12-31');
   updateChip();
+  if(document.getElementById('tab-baru').classList.contains('on')) renderRecent();
   if(document.getElementById('tab-daftar').classList.contains('on')) renderDaftar();
   if(document.getElementById('tab-rekap').classList.contains('on')) renderRekap(false);
   return ok && pending()===0;
