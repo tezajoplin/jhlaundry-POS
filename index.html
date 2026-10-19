@@ -226,9 +226,10 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
 
 <!-- ============ DAFTAR ============ -->
 <section id="tab-daftar">
+  <div class="row" style="margin-bottom:12px"><button class="btn" id="dModeTgl" type="button">Per tanggal</button><button class="btn alt" id="dModeAmbil" type="button">Belum diambil</button></div>
   <div class="card">
     <div class="row">
-      <div><label for="dTgl">Tanggal</label><input id="dTgl" type="date"></div>
+      <div id="dTglBox"><label for="dTgl">Tanggal</label><input id="dTgl" type="date"></div>
       <div><label for="dCari">Cari nama / nota</label><input id="dCari" type="search" placeholder="Ketik nama"></div>
     </div>
   </div>
@@ -621,7 +622,7 @@ async function buildOrder(){
     paket:gab(lines.map(l=>l.paket)), layanan:gab(lines.map(l=>l.layanan)), kg:jml('kg'), kgTagih:jml('kgTagih'), tarif:lines.length===1?lines[0].tarif:0, kiloan:lines, totalKiloan:lines.reduce((a,l)=>a+l.kilo,0), totalSatuan:c.satuan,
     items:formItems.map(i=>({...i})), tambah:c.tambah, potong:c.potong, total:c.total, ketTambah:c.tambah?ketTambah:'', ketPotong:c.potong?ketPotong:'',
     bayar, metode:lunas?$('fMetode').value:'', tglBayar:lunas?((editing && editing.bayar==='Lunas' && editing.tglBayar) || now):'',
-    estimasi:(editing||estManual) ? ($('fEst').value||'') : estAuto, antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), dirty:true
+    estimasi:(editing||estManual) ? ($('fEst').value||'') : estAuto, antar:$('fAntar').checked?'Ya':'Tidak', catatan:$('fCatatan').value.trim(), diambil:editing?(editing.diambil||''):'', dirty:true
   };
   if(editing){
     /* riwayat perubahan ikut tersimpan di kolom Catatan di Sheet (setelah tanda ||), tidak tampil di nota pelanggan */
@@ -808,19 +809,46 @@ function showNota(o, autoWa){
 function renderDaftar(){
   if(!$('dTgl').value) $('dTgl').value=todayStr();
   const d=$('dTgl').value, q=$('dCari').value.trim().toLowerCase();
-  const list=orders.filter(o=>o.tanggal.startsWith(d) && (!q || o.nama.toLowerCase().includes(q) || o.id.toLowerCase().includes(q))).sort((a,b)=>b.tanggal.localeCompare(a.tanggal));
-  if(!list.length){ $('daftarList').innerHTML='<div class="card empty">Belum ada pesanan pada tanggal ini.</div>'; return; }
+  const cocok = o => !q || o.nama.toLowerCase().includes(q) || o.id.toLowerCase().includes(q);
+  const menunggu = orders.filter(o=>!o.diambil && o.bayar!=='Batal');
+  const ambil = dMode==='ambil';
+  $('dModeTgl').className = ambil ? 'btn alt' : 'btn';
+  $('dModeAmbil').className = ambil ? 'btn' : 'btn alt';
+  $('dModeAmbil').textContent = `Belum diambil (${menunggu.length})`;
+  $('dTglBox').hidden = ambil;
+  const list = ambil ? menunggu.filter(cocok).sort((a,b)=>a.tanggal.localeCompare(b.tanggal))
+                     : orders.filter(o=>o.tanggal.startsWith(d) && cocok(o)).sort((a,b)=>b.tanggal.localeCompare(a.tanggal));
+  if(!list.length){ $('daftarList').innerHTML = ambil ? '<div class="card empty">Semua cucian sudah diambil.</div>' : '<div class="card empty">Belum ada pesanan pada tanggal ini.</div>'; return; }
   $('daftarList').innerHTML=list.map(o=>{
     const kiloTxt = o.kg>0?`${kgf(o.kg)} kg`:''; const sat = (o.items&&o.items.length)?`${o.items.reduce((a,i)=>a+i.qty,0)} satuan`:'';
     const desc=[o.paket,kiloTxt,sat].filter(Boolean).join(' · ');
     const batal = o.bayar==='Batal';
-    return `<div class="card order${batal?' void':''}"><div class="top"><div><div class="nm">${esc(o.nama)}</div><div class="meta">${esc(o.id)} · ${o.tanggal.slice(11)}</div><div class="meta">${esc(desc)}</div></div>
+    const hari = Math.max(0, Math.floor((Date.now()-new Date(o.tanggal).getTime())/86400000));
+    return `<div class="card order${batal?' void':''}"><div class="top"><div><div class="nm">${esc(o.nama)}</div><div class="meta">${esc(o.id)} · ${o.tanggal.slice(11)}</div><div class="meta">${esc(desc)}</div>${ambil?`<div class="meta" style="color:${hari>=30?'var(--red)':hari>=7?'var(--amber)':'var(--mute)'};font-weight:600">Masuk ${o.tanggal.slice(8,10)}/${o.tanggal.slice(5,7)}, menunggu ${hari<1?'sejak hari ini':hari+' hari'}</div>`:''}${!ambil && o.diambil && !batal?`<div class="meta" style="color:var(--green)">Diambil ${o.diambil.slice(8,10)}/${o.diambil.slice(5,7)} ${o.diambil.slice(11,16).replace(':','.')}</div>`:''}</div>
       <div style="text-align:right"><div style="font-weight:700">${rp(o.total)}</div><span class="badge ${batal?'batal':o.bayar==='Lunas'?'lunas':'belum'}">${batal?'Batal':o.bayar==='Lunas'?'Lunas':'Belum bayar'}</span></div></div>
-      ${batal?'':`<div class="acts"><button class="btn alt sm" data-nota="${esc(o.id)}" type="button">Nota</button><button class="btn alt sm" data-ubah="${esc(o.id)}" type="button">Ubah</button>${o.bayar!=='Lunas'?`<button class="btn sm" data-lunas="${esc(o.id)}" type="button">Tandai lunas</button>`:''}</div>`}</div>`;
+      ${batal?'':`<div class="acts"><button class="btn alt sm" data-nota="${esc(o.id)}" type="button">Nota</button><button class="btn alt sm" data-ubah="${esc(o.id)}" type="button">Ubah</button>${o.bayar!=='Lunas'?`<button class="btn sm" data-lunas="${esc(o.id)}" type="button">Tandai lunas</button>`:''}${!o.diambil?`<button class="btn wa sm" data-ambil="${esc(o.id)}" type="button">Sudah diambil</button>`:`<button class="btn ghost sm" data-urung="${esc(o.id)}" type="button">Urungkan diambil</button>`}</div>`}</div>`;
   }).join('');
   $('daftarList').querySelectorAll('[data-nota]').forEach(b=>b.addEventListener('click',()=>showNota(orders.find(o=>o.id===b.dataset.nota),false)));
   $('daftarList').querySelectorAll('[data-lunas]').forEach(b=>b.addEventListener('click',()=>askPay(b.dataset.lunas)));
   $('daftarList').querySelectorAll('[data-ubah]').forEach(b=>b.addEventListener('click',()=>startEdit(b.dataset.ubah)));
+  $('daftarList').querySelectorAll('[data-ambil]').forEach(b=>b.addEventListener('click',()=>askPickup(b.dataset.ambil)));
+  $('daftarList').querySelectorAll('[data-urung]').forEach(b=>b.addEventListener('click',()=>{
+    const o=orders.find(x=>x.id===b.dataset.urung); if(!o) return;
+    o.diambil=''; o.dirty=true; persist(); renderDaftar(); syncOne(o); toast('Status diambil dibatalkan');
+  }));
+}
+/* Cucian diambil. Kalau belum dibayar, sekalian terima pembayaran: satu alur, lebih sedikit ketukan */
+async function askPickup(id){
+  const o=orders.find(x=>x.id===id); if(!o) return;
+  if(o.bayar==='Belum' && o.total>0){
+    const r=await choose(`${o.nama}: belum dibayar ${rp(o.total)}`,'Terima pembayaran sekarang?',[
+      {label:'Bayar Tunai, lalu ambil',value:'Tunai'},{label:'Bayar Transfer, lalu ambil',value:'Transfer'},{label:'Bayar QRIS, lalu ambil',value:'QRIS'},
+      {label:'Diambil tapi belum bayar',value:'belum',cls:'alt'},{label:'Kembali',value:null,cls:'ghost'}]);
+    if(r===null) return;
+    if(r!=='belum'){ o.bayar='Lunas'; o.metode=r; o.tglBayar=isoLocal(); }
+  }
+  o.diambil=isoLocal(); o.dirty=true; persist(); renderDaftar(); syncOne(o);
+  toast(o.bayar==='Lunas' ? 'Dicatat: sudah diambil dan lunas' : 'Dicatat: sudah diambil, belum bayar');
 }
 async function startEdit(id){
   const o=orders.find(x=>x.id===id); if(!o) return;
@@ -840,6 +868,9 @@ function renderRecent(){
   }).join('');
 }
 $('recentList').addEventListener('click',e=>{ const b=e.target.closest('[data-ubah]'); if(b) startEdit(b.dataset.ubah); });
+let dMode='tgl';
+$('dModeTgl').addEventListener('click',()=>{ dMode='tgl'; renderDaftar(); });
+$('dModeAmbil').addEventListener('click',()=>{ dMode='ambil'; renderDaftar(); });
 $('dTgl').addEventListener('change',renderDaftar); $('dCari').addEventListener('input',renderDaftar);
 function askPay(id){
   openModal(`<h3>Tandai lunas</h3><p class="hint" style="margin-bottom:10px">Pilih cara bayar.</p><div class="stack">
@@ -874,7 +905,7 @@ function drawRekap(m){
   $('rekapHari').innerHTML = days.length ? '<tr><th>Tanggal</th><th>Pesanan</th><th>Kg</th><th>Tagihan</th></tr>'+days.map(d=>`<tr><td>${+d.slice(8)} ${BLN[+d.slice(5,7)-1]}</td><td>${r.hari[d].n}</td><td>${kgf(r.hari[d].kg)}</td><td>${rp(r.hari[d].rp)}</td></tr>`).join('')+`<tr><td><b>Total</b></td><td><b>${r.n}</b></td><td><b>${kgf(r.kg)}</b></td><td><b>${rp(r.tagihan)}</b></td></tr>` : '<tr><td class="empty" colspan="4">Belum ada pesanan bulan ini.</td></tr>';
 }
 $('rBulan').addEventListener('change',()=>renderRekap(true));
-const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan','totalKiloan','totalSatuan'];
+const CSV_COLS=['id','tanggal','nama','wa','paket','layanan','kg','kgTagih','tarif','tambah','ketTambah','potong','ketPotong','total','bayar','metode','tglBayar','estimasi','antar','catatan','totalKiloan','totalSatuan','diambil'];
 function toCsv(list){
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   const head=CSV_COLS.concat(['satuan']).join(',');

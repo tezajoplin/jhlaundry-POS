@@ -6,9 +6,9 @@ const PIN = 'GANTI-PIN-INI';   // <- isi PIN rahasia, samakan dengan kolom PIN d
 
 const SHEET = 'Pesanan';
 // KEYS = nama field di aplikasi, HEADERS = judul kolom yang tampil di Sheet
-const KEYS = ['id','tanggal','bulan','nama','wa','paket','layanan','kg','kgTagih','tarif','satuan','tambah','potong','total','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong'];
-const HEADERS = ['ID','Tanggal','Bulan','Nama','WhatsApp','Paket','Layanan','Kg','Kg ditagih','Tarif per kg','Satuan (ringkas)','Biaya tambahan','Potongan','Total','Status bayar','Cara bayar','Tanggal bayar','Estimasi selesai','Antar jemput','Catatan','Items (JSON)','Ket. biaya tambahan','Ket. potongan'];
-const NUM = ['kg','kgTagih','tarif','tambah','potong','total'];
+const KEYS = ['id','tanggal','bulan','nama','wa','paket','layanan','kg','kgTagih','tarif','satuan','tambah','potong','total','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','totalKiloan','totalSatuan','diambil'];
+const HEADERS = ['ID','Tanggal','Bulan','Nama','WhatsApp','Paket','Layanan','Kg','Kg ditagih','Tarif per kg','Satuan (ringkas)','Biaya tambahan','Potongan','Total','Status bayar','Cara bayar','Tanggal bayar','Estimasi selesai','Antar jemput','Catatan','Items (JSON)','Ket. biaya tambahan','Ket. potongan','Rincian kiloan (JSON)','Total kiloan (Rp)','Total satuan (Rp)','Tanggal diambil'];
+const NUM = ['kg','kgTagih','tarif','tambah','potong','total','totalKiloan','totalSatuan'];
 
 /** Jalankan SEKALI dari editor Apps Script (menu Run > setup) untuk membuat tab Pesanan dan Rekap. */
 function setup() {
@@ -21,7 +21,7 @@ function setup() {
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold').setBackground('#1b4aa0').setFontColor('#ffffff');
   sh.setFrozenRows(1);
   // kolom teks supaya tanggal dan nomor tidak diubah otomatis oleh Sheets
-  const textCols = ['id','tanggal','bulan','nama','wa','paket','layanan','satuan','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong'];
+  const textCols = ['id','tanggal','bulan','nama','wa','paket','layanan','satuan','bayar','metode','tglBayar','estimasi','antar','catatan','items','ketTambah','ketPotong','kiloan','diambil'];
   textCols.forEach(k => sh.getRange(1, KEYS.indexOf(k) + 1, sh.getMaxRows(), 1).setNumberFormat('@'));
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   NUM.forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat(k === 'kg' || k === 'kgTagih' ? '0.0' : '#,##0'));
@@ -55,12 +55,16 @@ function setup() {
   rk.setColumnWidths(1, 6, 150);
 }
 
-/** Jalankan SEKALI setelah update: menambah judul 2 kolom keterangan di tab Pesanan tanpa menyentuh data. */
-function tambahKolomKeterangan() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET);
+/** Menyamakan baris judul di tab Pesanan dengan HEADERS. Dipanggil otomatis, jadi kolom baru tidak perlu diketik manual. */
+function ensureHeaders_(sh) {
+  const cur = sh.getRange(1, 1, 1, HEADERS.length).getValues()[0];
+  if (HEADERS.every((h, i) => cur[i] === h)) return;
   sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold').setBackground('#1b4aa0').setFontColor('#ffffff');
-  ['ketTambah','ketPotong'].forEach(k => sh.getRange(1, KEYS.indexOf(k) + 1, sh.getMaxRows(), 1).setNumberFormat('@'));
+  ['ketTambah','ketPotong','kiloan','diambil'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('@'));
+  ['totalKiloan','totalSatuan'].forEach(k => sh.getRange(2, KEYS.indexOf(k) + 1, sh.getMaxRows() - 1, 1).setNumberFormat('#,##0'));
 }
+
+const rb_ = n => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -76,7 +80,7 @@ function objToRow_(o) {
   const items = Array.isArray(o.items) ? o.items : [];
   const full = Object.assign({}, o, {
     bulan: String(o.tanggal || '').slice(0, 7),
-    satuan: items.map(i => i.nama + ' x' + i.qty).join('; '),
+    satuan: items.map(i => i.nama + ' x' + i.qty + ' @' + rb_(i.harga)).join('; '),
     items: JSON.stringify(items)
   });
   return KEYS.map(k => NUM.indexOf(k) >= 0 ? Number(full[k]) || 0 : (full[k] == null ? '' : String(full[k])));
@@ -109,6 +113,7 @@ function doPost(e) {
   lock.waitLock(20000);
   try {
     const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET);
+    ensureHeaders_(sh);
     const row = objToRow_(body.order);
     const last = sh.getLastRow();
     let target = -1;
