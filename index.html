@@ -1228,7 +1228,11 @@ $('btnSimpanSetelan').addEventListener('click',()=>{
   settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value,kertas:$('pKertas').value,cetakIsi:$('pCetakIsi').value,jmlLabel:$('pJmlLabel').value,cetakAuto:$('pCetakAuto').checked,hurufStruk:$('pHuruf').value};
   save('jh_settings',settings); if(isPristine()) resetForm(); recompute(); updateChip(); toast('Pengaturan disimpan');
 });
-$('btnSync').addEventListener('click',async()=>{ const ok=await syncAll(true); toast(ok?'Sinkron selesai':'Sinkron gagal, cek URL dan PIN'); });
+$('btnSync').addEventListener('click',async()=>{
+  $('btnSimpanSetelan').click();   /* simpan isian dulu, supaya tidak perlu dua langkah */
+  if(!settings.url){ toast('Isi alamat Apps Script dan PIN dulu'); return; }
+  const ok=await syncAll(true); toast(ok?'Sinkron selesai':'Sinkron gagal, cek URL dan PIN');
+});
 $('btnBackup').addEventListener('click',()=>download('jh-laundry-cadangan.json',JSON.stringify({settings:{...settings,pin:''},orders},null,1),'application/json'));
 
 /* ===================== SINKRON GOOGLE SHEETS ===================== */
