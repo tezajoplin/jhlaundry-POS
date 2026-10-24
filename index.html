@@ -121,10 +121,10 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;st
 @media print{
   html,body{background:#fff!important;margin:0!important;padding:0!important}
   body>*:not(#printArea){display:none!important}
-  #printArea{display:block;color:#000;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.35;white-space:pre-wrap;word-break:break-word}
+  #printArea{display:block;color:#000;font-family:"Roboto Mono","DejaVu Sans Mono",Menlo,"Courier New",monospace;line-height:1.3;white-space:pre-wrap;overflow-wrap:anywhere}
   #printArea .struk{break-after:page;page-break-after:always}
   #printArea .struk:last-child{break-after:auto;page-break-after:auto}
-  #printArea .big{font-size:17px;font-weight:700;line-height:1.25}
+  #printArea .big{font-weight:700;line-height:1.15}
 }
 details{border-top:1px solid var(--line);padding:6px 0;margin-top:10px}
 summary{font-weight:600;cursor:pointer;padding:8px 0;color:var(--blue-d)}
@@ -341,6 +341,8 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
     <div class="hint" style="margin-top:0" id="devInfo"></div>
     <label for="pKertas">Lebar kertas printer struk</label>
     <select id="pKertas"><option value="58">58 mm (paling umum)</option><option value="80">80 mm</option></select>
+    <label for="pHuruf">Ukuran huruf struk</label>
+    <select id="pHuruf"><option value="normal">Normal (muat 32 karakter per baris di kertas 58 mm)</option><option value="besar">Besar (24 karakter per baris)</option></select>
     <label for="pCetakIsi">Isi cetakan</label>
     <select id="pCetakIsi"><option value="nota_label">Nota pelanggan + label plastik</option><option value="nota">Nota pelanggan saja</option><option value="label">Label plastik saja</option></select>
     <label for="pJmlLabel">Jumlah label plastik per pesanan</label>
@@ -460,7 +462,7 @@ const KETENTUAN_DEFAULT = [
   'Cucian yang tidak diambil lebih dari 30 hari di luar tanggung jawab kami.',
   'Kehilangan atau kerusakan karena kelalaian kami diganti maksimal 10x biaya cuci item tersebut.'
 ].join('\n');
-let settings = Object.assign({cetakIsi:'nota_label',jmlLabel:'1',cetakAuto:false,kertas:'58',nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
+let settings = Object.assign({hurufStruk:'normal',cetakIsi:'nota_label',jmlLabel:'1',cetakAuto:false,kertas:'58',nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
 let orders = load('jh_orders',[]);
 let formItems = [];
 let editing = null;   /* pesanan yang sedang diubah (null = pesanan baru) */
@@ -915,30 +917,97 @@ function askNumber(title,hint,val,quick){
 }
 
 /* Cetak lewat dialog cetak bawaan browser. Di tablet Android, aplikasi RawBT (atau layanan cetak printer lain) muncul sebagai pilihan printer. */
+/* ===================== CETAK: struk ditata per baris sesuai kapasitas kertas ===================== */
+/* Kertas 58 mm: area cetak 48 mm = 384 titik = 32 karakter per baris. Kertas 80 mm: 72 mm = 48 karakter. */
+function strukSpec(){
+  const w = settings.kertas==='80' ? 80 : 58, area = w===80 ? 72 : 48, base = w===80 ? 48 : 32;
+  const cols = settings.hurufStruk==='besar' ? Math.floor(base*0.75) : base;
+  return {w, area, cols, fs: +(area/cols/0.6*0.98).toFixed(2)};   /* huruf monospace selebar 0,6 kali tingginya; dikurangi 2% sebagai kelonggaran */
+}
+function wrapTxt(t, cols, first, cont){
+  first = first||''; cont = cont==null ? first.replace(/\S/g,' ') : cont;
+  const max = Math.max(4, cols-Math.max(first.length,cont.length)), chunks=[];
+  String(t).split(/\s+/).filter(Boolean).forEach(w=>{ while(w.length>max){ chunks.push(w.slice(0,max)); w=w.slice(max); } chunks.push(w); });
+  const out=[]; let cur=first, empty=true;
+  chunks.forEach(w=>{
+    if(!empty && (cur+' '+w).length>cols){ out.push(cur); cur=cont+w; }
+    else cur = empty ? cur+w : cur+' '+w;
+    empty=false;
+  });
+  out.push(cur); return out;
+}
+function dua(kiri, kanan, cols){   /* teks kiri, harga rata kanan */
+  kiri=String(kiri); kanan=String(kanan);
+  if(kiri.length+kanan.length+1<=cols) return [kiri+' '.repeat(cols-kiri.length-kanan.length)+kanan];
+  const o=wrapTxt(kiri,cols,'','  '), last=o[o.length-1];
+  if(last.length+kanan.length+1<=cols){ o[o.length-1]=last+' '.repeat(cols-last.length-kanan.length)+kanan; return o; }
+  o.push(' '.repeat(Math.max(0,cols-kanan.length))+kanan); return o;
+}
+const BOLD='\x01', BIG='\x02';
+function lineHtml(x){ return x[0]===BOLD ? `<b>${esc(x.slice(1))}</b>` : x[0]===BIG ? `<span class="big">${esc(x.slice(1))}</span>` : esc(x); }
+function ringkasLines(o){   /* paket kiloan sebagai daftar baris, termasuk pesanan lama yang belum punya rincian */
+  const ls=linesOf(o);
+  if(ls.length) return ls;
+  if(o.paket && o.kg>0) return [{paket:o.paket, layanan:o.layanan||'', kg:+o.kg, kgTagih:+o.kgTagih||+o.kg, tarif:+o.tarif||0, kilo:Math.round((+o.kgTagih||+o.kg)*(+o.tarif||0)), ringkas:true}];
+  return [];
+}
+function strukLines(o, cols){
+  const L=[], sep='-'.repeat(cols);
+  const tengah = (t,pre)=>wrapTxt(t,cols).forEach(x=>L.push((pre||'')+' '.repeat(Math.max(0,Math.floor((cols-x.length)/2)))+x));
+  const kv = (k,v,pre)=>wrapTxt(v,cols,k,' '.repeat(k.length)).forEach(x=>L.push((pre||'')+x));
+  tengah((settings.nama||'JH Laundry').toUpperCase(), BOLD);
+  if(settings.alamat) tengah(settings.alamat);
+  if(settings.telp) tengah(settings.telp);
+  L.push(sep);
+  kv('Nota : ',o.id); kv('Tgl  : ',tglLabel(o.tanggal)); kv('Nama : ',o.nama);
+  L.push(sep);
+  const ls=ringkasLines(o), jamOf=l=>PAKET[l.paket] && PAKET[l.paket].jam, beda=new Set(ls.map(jamOf).filter(Boolean)).size>1;
+  ls.forEach(l=>{
+    wrapTxt(l.paket+(l.layanan?' '+String(l.layanan).replace('Cuci ',''):''),cols).forEach(x=>L.push(x));
+    if(l.ringkas) L.push(' '+kgf(l.kg)+' kg');
+    else dua(` ${kgf(l.kg)} kg x ${rpn(l.tarif)}`, rp(l.kilo), cols).forEach(x=>L.push(x));
+    if(l.kgTagih>l.kg) L.push(` (ditagih ${kgf(l.kgTagih)} kg)`);
+    if(beda && jamOf(l)){ const d=new Date(new Date(o.tanggal).getTime()+jamOf(l)*3600*1000); L.push(` selesai ${HARI[d.getDay()]} ${d.getDate()}/${p2(d.getMonth()+1)} ${p2(d.getHours())}.${p2(d.getMinutes())}`); }
+  });
+  if(o.items && o.items.length){ L.push('Satuan:'); o.items.forEach(i=>dua(` ${i.nama} x${i.qty}`, rp(i.qty*i.harga), cols).forEach(x=>L.push(x))); }
+  L.push(sep);
+  if(o.tambah) dua('Biaya tambahan'+(o.ketTambah?` (${o.ketTambah})`:''), rp(o.tambah), cols).forEach(x=>L.push(x));
+  if(o.potongPromo>0) dua(promoLabel(o.promo), '-'+rp(o.potongPromo), cols).forEach(x=>L.push(x));
+  if(o.potong) dua('Potongan'+(o.ketPotong?` (${o.ketPotong})`:''), '-'+rp(o.potong), cols).forEach(x=>L.push(x));
+  dua('TOTAL', rp(o.total), cols).forEach(x=>L.push(BOLD+x));
+  L.push(o.bayar==='Lunas' ? 'Status: LUNAS'+(o.metode?` (${o.metode})`:'') : 'Status: BELUM DIBAYAR');
+  if(o.estimasi) kv('Selesai: ',tglLabel(o.estimasi),BOLD);
+  if(o.antar==='Ya') L.push('Antar jemput: Ya');
+  const cn=splitCat(o.catatan).note.trim(); if(cn) kv('Catatan: ',cn);
+  const ket=String(settings.ketentuan||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  if(ket.length){ L.push(sep,'Ketentuan:'); ket.forEach((k,i)=>wrapTxt(k,cols,`${i+1}. `,'   ').forEach(x=>L.push(x))); }
+  if(settings.footer){ L.push(sep); tengah(settings.footer); }
+  L.push('',''); return L;
+}
 /* Label kecil untuk ditempel di plastik cucian: nama besar, nomor nota, isi, jam selesai, catatan */
-function labelHtml(o, no, dari){
-  const L=[], kl=Array.isArray(o.kiloan)?o.kiloan:[];
-  L.push(`<b>${esc((settings.nama||'JH Laundry').toUpperCase())}</b>${dari>1?`   Plastik ${no}/${dari}`:''}`);
-  L.push(`<span class="big">${esc(String(o.nama).toUpperCase())}</span>`);
-  L.push(esc(o.id));
-  L.push(`Masuk: ${esc(tglLabel(o.tanggal))}`);
-  if(kl.length) kl.forEach(l=>L.push(`${esc(l.paket)}${l.layanan?' '+esc(String(l.layanan).replace('Cuci ','')):''}: ${kgf(l.kg)} kg`));
-  else if(o.paket && o.kg>0) L.push(`${esc(o.paket)}${o.layanan?' '+esc(String(o.layanan).replace('Cuci ','')):''}: ${kgf(o.kg)} kg`);
+function labelLines(o, no, dari, cols){
+  const L=[], sep='='.repeat(cols), nm=(settings.nama||'JH Laundry').toUpperCase();
+  (dari>1 ? dua(nm,`Plastik ${no}/${dari}`,cols) : [nm]).forEach(x=>L.push(BOLD+x));
+  wrapTxt(String(o.nama).toUpperCase(), Math.max(6,Math.floor(cols/2))).forEach(x=>L.push(BIG+x));   /* huruf 2x lebar: separuh jumlah karakter */
+  L.push(sep);
+  wrapTxt(o.id,cols).forEach(x=>L.push(x));
+  wrapTxt('Masuk: '+tglLabel(o.tanggal),cols,'','       ').forEach(x=>L.push(x));
+  ringkasLines(o).forEach(l=>wrapTxt(`${l.paket}${l.layanan?' '+String(l.layanan).replace('Cuci ',''):''}: ${kgf(l.kg)} kg`,cols,'','  ').forEach(x=>L.push(x)));
   const n=(o.items||[]).reduce((a,i)=>a+i.qty,0);
-  if(n) L.push(`Satuan ${n} item: ${(o.items||[]).map(i=>`${esc(i.nama)} x${i.qty}`).join(', ')}`);
-  if(o.estimasi) L.push(`<b>Selesai: ${esc(tglLabel(o.estimasi))}</b>`);
-  const cn=splitCat(o.catatan).note.trim(); if(cn) L.push(`Catatan: ${esc(cn)}`);
-  L.push(o.bayar==='Lunas' ? '<b>LUNAS</b>' : `<b>BELUM BAYAR ${rp(o.total)}</b>`);
-  return `<div class="struk">${L.join('\n')}</div>`;
+  if(n) wrapTxt(`Satuan ${n} item: ${o.items.map(i=>`${i.nama} x${i.qty}`).join(', ')}`,cols,'','  ').forEach(x=>L.push(x));
+  if(o.estimasi) wrapTxt('Selesai: '+tglLabel(o.estimasi),cols,'','         ').forEach(x=>L.push(BOLD+x));
+  const cn=splitCat(o.catatan).note.trim(); if(cn) wrapTxt('Catatan: '+cn,cols,'','         ').forEach(x=>L.push(x));
+  L.push(BOLD+(o.bayar==='Lunas' ? 'LUNAS' : 'BELUM BAYAR '+rp(o.total)));
+  L.push('',''); return L;
 }
 function cetakNota(o){
-  const w = settings.kertas==='80' ? 80 : 58, area = w===80 ? 72 : 48;
-  const isi = settings.cetakIsi||'nota_label', jml = Math.min(3, Math.max(1, parseInt(settings.jmlLabel)||1));
+  const {w,area,cols,fs}=strukSpec();
+  const isi=settings.cetakIsi||'nota_label', jml=Math.min(3,Math.max(1,parseInt(settings.jmlLabel)||1));
   const blok=[];
-  if(isi!=='label') blok.push(`<div class="struk">${esc(buildNota(o).replace(/\*/g,''))}</div>`);
-  if(isi!=='nota') for(let i=1;i<=jml;i++) blok.push(labelHtml(o,i,jml));
-  $('pageStyle').textContent = `@media print{@page{size:${w}mm auto;margin:2mm 3mm}#printArea{width:${area}mm}}`;
-  $('printArea').innerHTML = blok.join('');
+  if(isi!=='label') blok.push(strukLines(o,cols));
+  if(isi!=='nota') for(let i=1;i<=jml;i++) blok.push(labelLines(o,i,jml,cols));
+  $('pageStyle').textContent = `@media print{@page{size:${w}mm auto;margin:2mm 3mm}#printArea{width:${area}mm;font-size:${fs}mm}#printArea .big{font-size:${(fs*2).toFixed(2)}mm}}`;
+  $('printArea').innerHTML = blok.map(L=>`<div class="struk">${L.map(lineHtml).join('\n')}</div>`).join('');
   try{ window.print(); }catch(e){ toast('Perangkat ini tidak bisa mencetak'); }
 }
 function showNota(o, autoWa, autoPrint){
@@ -1081,7 +1150,7 @@ function fillSettings(){
   $('pDefPaket').innerHTML = Object.keys(PAKET).map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('') + '<option value="">Satuan saja</option>';
   $('pDefPaket').value = startPaket();
   $('pKertas').value = settings.kertas==='80' ? '80' : '58';
-  $('pCetakIsi').value = settings.cetakIsi||'nota_label'; $('pJmlLabel').value = settings.jmlLabel||'1'; $('pCetakAuto').checked = !!settings.cetakAuto;
+  $('pCetakIsi').value = settings.cetakIsi||'nota_label'; $('pJmlLabel').value = settings.jmlLabel||'1'; $('pCetakAuto').checked = !!settings.cetakAuto; $('pHuruf').value = settings.hurufStruk==='besar' ? 'besar' : 'normal';
   $('devInfo').textContent = `Kode perangkat: ${DEVICE}. Kode ini ada di akhir setiap nomor nota dari perangkat ini, jadi kamu bisa tahu pesanan dicatat dari HP atau tablet yang mana.`;
   $('pDefLay').innerHTML = LAYANAN.map(l=>`<option>${esc(l)}</option>`).join(''); $('pDefLay').value = startLayanan();
   renderHarga();
@@ -1156,7 +1225,7 @@ $('btnSimpanHarga').addEventListener('click',async()=>{
   toast(ok ? 'Harga dan promo tersimpan di Sheet' : 'Tersimpan di perangkat ini');
 });
 $('btnSimpanSetelan').addEventListener('click',()=>{
-  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value,kertas:$('pKertas').value,cetakIsi:$('pCetakIsi').value,jmlLabel:$('pJmlLabel').value,cetakAuto:$('pCetakAuto').checked};
+  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value,kertas:$('pKertas').value,cetakIsi:$('pCetakIsi').value,jmlLabel:$('pJmlLabel').value,cetakAuto:$('pCetakAuto').checked,hurufStruk:$('pHuruf').value};
   save('jh_settings',settings); if(isPristine()) resetForm(); recompute(); updateChip(); toast('Pengaturan disimpan');
 });
 $('btnSync').addEventListener('click',async()=>{ const ok=await syncAll(true); toast(ok?'Sinkron selesai':'Sinkron gagal, cek URL dan PIN'); });
