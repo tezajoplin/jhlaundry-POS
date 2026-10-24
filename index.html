@@ -122,6 +122,9 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;st
   html,body{background:#fff!important;margin:0!important;padding:0!important}
   body>*:not(#printArea){display:none!important}
   #printArea{display:block;color:#000;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.35;white-space:pre-wrap;word-break:break-word}
+  #printArea .struk{break-after:page;page-break-after:always}
+  #printArea .struk:last-child{break-after:auto;page-break-after:auto}
+  #printArea .big{font-size:17px;font-weight:700;line-height:1.25}
 }
 details{border-top:1px solid var(--line);padding:6px 0;margin-top:10px}
 summary{font-weight:600;cursor:pointer;padding:8px 0;color:var(--blue-d)}
@@ -338,7 +341,12 @@ pre.nota{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Men
     <div class="hint" style="margin-top:0" id="devInfo"></div>
     <label for="pKertas">Lebar kertas printer struk</label>
     <select id="pKertas"><option value="58">58 mm (paling umum)</option><option value="80">80 mm</option></select>
-    <div class="hint">Untuk tombol Cetak di nota. Setelannya per perangkat, jadi atur di tablet toko.</div>
+    <label for="pCetakIsi">Isi cetakan</label>
+    <select id="pCetakIsi"><option value="nota_label">Nota pelanggan + label plastik</option><option value="nota">Nota pelanggan saja</option><option value="label">Label plastik saja</option></select>
+    <label for="pJmlLabel">Jumlah label plastik per pesanan</label>
+    <select id="pJmlLabel"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+    <label class="chk" for="pCetakAuto"><input id="pCetakAuto" type="checkbox"> Langsung cetak setelah menyimpan pesanan baru</label>
+    <div class="hint">Untuk tombol Cetak di nota. Semua setelan cetak ini per perangkat, jadi atur di tablet toko.</div>
   </div>
   <div class="card">
     <h2>Cadangan</h2>
@@ -452,7 +460,7 @@ const KETENTUAN_DEFAULT = [
   'Cucian yang tidak diambil lebih dari 30 hari di luar tanggung jawab kami.',
   'Kehilangan atau kerusakan karena kelalaian kami diganti maksimal 10x biaya cuci item tersebut.'
 ].join('\n');
-let settings = Object.assign({kertas:'58',nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
+let settings = Object.assign({cetakIsi:'nota_label',jmlLabel:'1',cetakAuto:false,kertas:'58',nama:'JH Laundry',ketentuan:KETENTUAN_DEFAULT,telp:'',alamat:'',footer:'Terima kasih sudah mencuci di JH Laundry. Bersih, wangi, rapi!',url:'',pin:'',minKg:true,defPaket:'Reguler',defLayanan:'Cuci Komplit'}, load('jh_settings',{}));
 let orders = load('jh_orders',[]);
 let formItems = [];
 let editing = null;   /* pesanan yang sedang diubah (null = pesanan baru) */
@@ -837,7 +845,7 @@ async function saveOrder(sendWa){
     persist(); resetForm(); fillCustList();
     if(wasEdit) showTab('daftar');
     syncOne(o);
-    showNota(o, sendWa);
+    showNota(o, sendWa, !wasEdit);
   } finally { saving=false; lockSave(false); }
 }
 
@@ -907,13 +915,33 @@ function askNumber(title,hint,val,quick){
 }
 
 /* Cetak lewat dialog cetak bawaan browser. Di tablet Android, aplikasi RawBT (atau layanan cetak printer lain) muncul sebagai pilihan printer. */
+/* Label kecil untuk ditempel di plastik cucian: nama besar, nomor nota, isi, jam selesai, catatan */
+function labelHtml(o, no, dari){
+  const L=[], kl=Array.isArray(o.kiloan)?o.kiloan:[];
+  L.push(`<b>${esc((settings.nama||'JH Laundry').toUpperCase())}</b>${dari>1?`   Plastik ${no}/${dari}`:''}`);
+  L.push(`<span class="big">${esc(String(o.nama).toUpperCase())}</span>`);
+  L.push(esc(o.id));
+  L.push(`Masuk: ${esc(tglLabel(o.tanggal))}`);
+  if(kl.length) kl.forEach(l=>L.push(`${esc(l.paket)}${l.layanan?' '+esc(String(l.layanan).replace('Cuci ','')):''}: ${kgf(l.kg)} kg`));
+  else if(o.paket && o.kg>0) L.push(`${esc(o.paket)}${o.layanan?' '+esc(String(o.layanan).replace('Cuci ','')):''}: ${kgf(o.kg)} kg`);
+  const n=(o.items||[]).reduce((a,i)=>a+i.qty,0);
+  if(n) L.push(`Satuan ${n} item: ${(o.items||[]).map(i=>`${esc(i.nama)} x${i.qty}`).join(', ')}`);
+  if(o.estimasi) L.push(`<b>Selesai: ${esc(tglLabel(o.estimasi))}</b>`);
+  const cn=splitCat(o.catatan).note.trim(); if(cn) L.push(`Catatan: ${esc(cn)}`);
+  L.push(o.bayar==='Lunas' ? '<b>LUNAS</b>' : `<b>BELUM BAYAR ${rp(o.total)}</b>`);
+  return `<div class="struk">${L.join('\n')}</div>`;
+}
 function cetakNota(o){
   const w = settings.kertas==='80' ? 80 : 58, area = w===80 ? 72 : 48;
+  const isi = settings.cetakIsi||'nota_label', jml = Math.min(3, Math.max(1, parseInt(settings.jmlLabel)||1));
+  const blok=[];
+  if(isi!=='label') blok.push(`<div class="struk">${esc(buildNota(o).replace(/\*/g,''))}</div>`);
+  if(isi!=='nota') for(let i=1;i<=jml;i++) blok.push(labelHtml(o,i,jml));
   $('pageStyle').textContent = `@media print{@page{size:${w}mm auto;margin:2mm 3mm}#printArea{width:${area}mm}}`;
-  $('printArea').textContent = buildNota(o).replace(/\*/g,'');
+  $('printArea').innerHTML = blok.join('');
   try{ window.print(); }catch(e){ toast('Perangkat ini tidak bisa mencetak'); }
 }
-function showNota(o, autoWa){
+function showNota(o, autoWa, autoPrint){
   const sd = o.wa ? '' : '<div class="note">Nomor WhatsApp belum diisi. Tombol kirim akan membuka WhatsApp, lalu pilih kontaknya.</div>';
   openModal(`<h3>Nota ${esc(o.id)}</h3>
     <div class="stack">
@@ -926,7 +954,9 @@ function showNota(o, autoWa){
   if($('btnUbahNota')) $('btnUbahNota').addEventListener('click',()=>{ closeModal(); startEdit(o.id); });
   $('btnSalin').addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(buildNota(o)); toast('Nota disalin'); }catch(e){ toast('Tidak bisa menyalin'); } });
   $('btnTutup').addEventListener('click',()=>closeModal());
-  if(autoWa){ setTimeout(()=>{ window.open(waLink(o),'_blank'); },150); }
+  const doPrint = !!(autoPrint && settings.cetakAuto);
+  if(doPrint) setTimeout(()=>cetakNota(o),100);
+  if(autoWa){ setTimeout(()=>{ window.open(waLink(o),'_blank'); }, doPrint ? 1800 : 150); }
 }
 
 /* ===================== DAFTAR ===================== */
@@ -1051,6 +1081,7 @@ function fillSettings(){
   $('pDefPaket').innerHTML = Object.keys(PAKET).map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('') + '<option value="">Satuan saja</option>';
   $('pDefPaket').value = startPaket();
   $('pKertas').value = settings.kertas==='80' ? '80' : '58';
+  $('pCetakIsi').value = settings.cetakIsi||'nota_label'; $('pJmlLabel').value = settings.jmlLabel||'1'; $('pCetakAuto').checked = !!settings.cetakAuto;
   $('devInfo').textContent = `Kode perangkat: ${DEVICE}. Kode ini ada di akhir setiap nomor nota dari perangkat ini, jadi kamu bisa tahu pesanan dicatat dari HP atau tablet yang mana.`;
   $('pDefLay').innerHTML = LAYANAN.map(l=>`<option>${esc(l)}</option>`).join(''); $('pDefLay').value = startLayanan();
   renderHarga();
@@ -1125,7 +1156,7 @@ $('btnSimpanHarga').addEventListener('click',async()=>{
   toast(ok ? 'Harga dan promo tersimpan di Sheet' : 'Tersimpan di perangkat ini');
 });
 $('btnSimpanSetelan').addEventListener('click',()=>{
-  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value,kertas:$('pKertas').value};
+  settings={nama:$('pNama').value.trim()||'JH Laundry',telp:$('pTelp').value.trim(),alamat:$('pAlamat').value.trim(),footer:$('pFooter').value.trim(),ketentuan:$('pKetentuan').value.trim(),url:$('pUrl').value.trim(),pin:$('pPin').value,minKg:$('pMinKg').checked,defPaket:$('pDefPaket').value,defLayanan:$('pDefLay').value,kertas:$('pKertas').value,cetakIsi:$('pCetakIsi').value,jmlLabel:$('pJmlLabel').value,cetakAuto:$('pCetakAuto').checked};
   save('jh_settings',settings); if(isPristine()) resetForm(); recompute(); updateChip(); toast('Pengaturan disimpan');
 });
 $('btnSync').addEventListener('click',async()=>{ const ok=await syncAll(true); toast(ok?'Sinkron selesai':'Sinkron gagal, cek URL dan PIN'); });
